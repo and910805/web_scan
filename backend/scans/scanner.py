@@ -2,6 +2,7 @@ import re
 import socket
 import ssl
 import time
+import json
 from http.cookies import SimpleCookie
 from urllib import error, parse, request
 
@@ -27,6 +28,8 @@ SENSITIVE_PATHS = (
     "/backup.tar.gz",
     "/server-status",
     "/phpinfo.php",
+)
+EXPOSED_SURFACE_PATHS = (
     "/admin",
     "/login",
 )
@@ -67,6 +70,28 @@ ERROR_DISCLOSURE_PATTERNS = (
     "typeerror",
     "fatal error",
 )
+SEVERITY_WEIGHTS = {
+    "critical": 40,
+    "high": 20,
+    "medium": 8,
+    "low": 3,
+}
+CATEGORY_RISK_BONUS = {
+    "sensitive_path": 12,
+    "exposed_surface": 2,
+    "tls": 8,
+    "api_schema": 4,
+    "http_methods": 7,
+    "cookie_security": 5,
+    "transport_security": 6,
+    "error_disclosure": 5,
+    "api_surface": 4,
+    "security_headers": 3,
+    "information_disclosure": 2,
+    "robots_disclosure": 1,
+    "sitemap_disclosure": 1,
+    "cors": 4,
+}
 
 
 class _NoRedirectHandler(request.HTTPRedirectHandler):
@@ -86,7 +111,9 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
     tls_details = _inspect_tls(parsed)
     security_headers = _inspect_security_headers(homepage)
     sensitive_paths = [_probe_path(normalized_url, path, base_headers) for path in SENSITIVE_PATHS]
+    exposed_surface_paths = [_probe_path(normalized_url, path, base_headers) for path in EXPOSED_SURFACE_PATHS]
     api_paths = [_probe_path(normalized_url, path, base_headers, method="OPTIONS") for path in COMMON_API_PATHS]
+    api_schema_analysis = _analyze_api_schema(normalized_url, base_headers)
     common_files = [_probe_path(normalized_url, path, base_headers) for path in COMMON_DISCOVERY_PATHS]
     cookie_assessment = _inspect_cookie_security(homepage)
     http_methods = _inspect_http_methods(normalized_url, base_headers)
@@ -178,6 +205,19 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
                 )
             )
 
+    for item in exposed_surface_paths:
+        if item["status_code"] == 200:
+            issues.append(
+                _build_issue(
+                    category="exposed_surface",
+                    severity="low",
+                    title=f"Public attack surface discovered: {item['path']}",
+                    details=f"{item['url']} is publicly reachable and should be reviewed as part of the exposed surface.",
+                    evidence=_format_probe_evidence(item),
+                    recommendation="Ensure this public entry point has authentication, rate limits, and monitoring where appropriate.",
+                )
+            )
+
     for item in api_paths:
         if item["path"] in {"/openapi.json", "/swagger", "/api/docs"} and item["status_code"] == 200:
             issues.append(
@@ -188,6 +228,41 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
                     details=f"{item['url']} returned HTTP 200.",
                     evidence=_format_probe_evidence(item),
                     recommendation="Restrict interactive API docs to authenticated or internal users only.",
+                )
+            )
+
+    if api_schema_analysis["status"] == "ok":
+        if api_schema_analysis["public_endpoint_count"] > 0:
+            issues.append(
+                _build_issue(
+                    category="api_schema",
+                    severity="medium",
+                    title="API schema exposes public endpoints",
+                    details=(
+                        f"Schema analysis found {api_schema_analysis['path_count']} paths and "
+                        f"{api_schema_analysis['public_endpoint_count']} operations without obvious security requirements."
+                    ),
+                    evidence=(
+                        f"Schema URL: {api_schema_analysis['url']} | "
+                        f"Example public operations: {', '.join(api_schema_analysis['public_examples']) or 'none'}"
+                    ),
+                    recommendation="Review exposed endpoints and add authentication or authorization requirements where needed.",
+                )
+            )
+        if api_schema_analysis["sensitive_endpoint_count"] > 0:
+            issues.append(
+                _build_issue(
+                    category="api_schema",
+                    severity="low",
+                    title="API schema lists sensitive-looking endpoints",
+                    details=(
+                        f"The published schema includes {api_schema_analysis['sensitive_endpoint_count']} "
+                        "endpoints with admin, internal, or auth-related naming."
+                    ),
+                    evidence=(
+                        f"Examples: {', '.join(api_schema_analysis['sensitive_examples']) or 'none'}"
+                    ),
+                    recommendation="Confirm that sensitive API routes are protected and intentionally documented.",
                 )
             )
 
@@ -323,10 +398,14 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
             )
         )
 
+    issues, deduplication = _deduplicate_issues(issues)
+
     summary = {
         "scan_type": scan_type,
         "target_url": normalized_url,
         "issue_count": len(issues),
+        "raw_issue_count": deduplication["raw_issue_count"],
+        "deduplicated_issue_count": deduplication["merged_issue_count"],
         "critical_count": len([item for item in issues if item["severity"] == "critical"]),
         "high_count": len([item for item in issues if item["severity"] == "high"]),
         "medium_count": len([item for item in issues if item["severity"] == "medium"]),
@@ -354,13 +433,16 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
         "security_headers": security_headers,
         "common_files": common_files,
         "sensitive_paths": sensitive_paths,
+        "exposed_surface_paths": exposed_surface_paths,
         "api_paths": api_paths,
+        "api_schema_analysis": api_schema_analysis,
         "cookie_security": cookie_assessment,
         "http_methods": http_methods,
         "https_redirect": https_redirect,
         "error_disclosure": error_disclosure,
         "robots_analysis": robots_analysis,
         "sitemap_analysis": sitemap_analysis,
+        "deduplication": deduplication,
         "cors": cors_check,
         "unauthenticated_paths": unauthenticated_paths,
         "issues": issues,
@@ -411,6 +493,29 @@ def _probe_path(base_url: str, path: str, headers: dict[str, str], method: str =
     url = parse.urljoin(_ensure_trailing_slash(base_url), path.lstrip("/"))
     try:
         response = _request(url, headers=headers, method=method)
+        return {
+            "path": path,
+            "url": url,
+            "status_code": response["status_code"],
+            "content_type": _header_value(response, "Content-Type"),
+            "body_preview": response["body_preview"],
+            "headers": response["headers"],
+        }
+    except Exception as exc:
+        return {
+            "path": path,
+            "url": url,
+            "status_code": 0,
+            "error": str(exc),
+            "body_preview": "",
+            "headers": {},
+        }
+
+
+def _fetch_schema_url(base_url: str, path: str, headers: dict[str, str]) -> dict:
+    url = parse.urljoin(_ensure_trailing_slash(base_url), path.lstrip("/"))
+    try:
+        response = _request(url, headers=headers, method="GET")
         return {
             "path": path,
             "url": url,
@@ -636,6 +741,72 @@ def _analyze_sitemap(common_files: list[dict], base_url: str) -> dict:
     }
 
 
+def _analyze_api_schema(base_url: str, headers: dict[str, str]) -> dict:
+    for path in ("/openapi.json", "/swagger.json"):
+        candidate = _fetch_schema_url(base_url, path, headers)
+        if candidate["status_code"] != 200:
+            continue
+
+        try:
+            schema = json.loads(candidate["body_preview"])
+        except json.JSONDecodeError:
+            continue
+
+        paths = schema.get("paths", {}) if isinstance(schema, dict) else {}
+        if not isinstance(paths, dict):
+            continue
+
+        operations = []
+        public_examples = []
+        sensitive_examples = []
+
+        for route, route_definition in paths.items():
+            if not isinstance(route_definition, dict):
+                continue
+
+            for method, operation in route_definition.items():
+                if method.lower() not in {"get", "post", "put", "patch", "delete", "options", "head"}:
+                    continue
+                if not isinstance(operation, dict):
+                    continue
+
+                security = operation.get("security", route_definition.get("security", schema.get("security", [])))
+                operation_key = f"{method.upper()} {route}"
+                operations.append(
+                    {
+                        "operation": operation_key,
+                        "has_security": bool(security),
+                    }
+                )
+
+                if not security and len(public_examples) < 5:
+                    public_examples.append(operation_key)
+                if _contains_sensitive_hint(route) and len(sensitive_examples) < 5:
+                    sensitive_examples.append(operation_key)
+
+        return {
+            "status": "ok",
+            "url": candidate["url"],
+            "path_count": len(paths),
+            "operation_count": len(operations),
+            "public_endpoint_count": len([item for item in operations if not item["has_security"]]),
+            "sensitive_endpoint_count": len({item for item in sensitive_examples}),
+            "public_examples": public_examples,
+            "sensitive_examples": sensitive_examples,
+        }
+
+    return {
+        "status": "not_found",
+        "url": "",
+        "path_count": 0,
+        "operation_count": 0,
+        "public_endpoint_count": 0,
+        "sensitive_endpoint_count": 0,
+        "public_examples": [],
+        "sensitive_examples": [],
+    }
+
+
 def _build_issue(category: str, severity: str, title: str, details: str, evidence: str, recommendation: str) -> dict:
     return {
         "category": category,
@@ -648,8 +819,74 @@ def _build_issue(category: str, severity: str, title: str, details: str, evidenc
 
 
 def _calculate_risk_score(issues: list[dict]) -> int:
-    weights = {"critical": 40, "high": 20, "medium": 8, "low": 3}
-    return sum(weights.get(issue.get("severity", ""), 0) for issue in issues)
+    total = 0
+    for issue in issues:
+        severity = issue.get("severity", "")
+        category = issue.get("category", "")
+        occurrences = int(issue.get("occurrence_count", 1) or 1)
+        base = SEVERITY_WEIGHTS.get(severity, 0)
+        bonus = CATEGORY_RISK_BONUS.get(category, 0)
+        total += base + bonus + min(max(occurrences - 1, 0), 4)
+    return min(total, 100)
+
+
+def _deduplicate_issues(issues: list[dict]) -> tuple[list[dict], dict]:
+    deduped: dict[str, dict] = {}
+    merged_issue_count = 0
+
+    for issue in issues:
+        key = _issue_dedup_key(issue)
+        existing = deduped.get(key)
+        if not existing:
+            normalized = dict(issue)
+            normalized["occurrence_count"] = 1
+            normalized["evidence_items"] = [issue.get("evidence", "")]
+            deduped[key] = normalized
+            continue
+
+        merged_issue_count += 1
+        existing["occurrence_count"] += 1
+        if issue.get("evidence"):
+            evidence_items = existing.setdefault("evidence_items", [])
+            if issue["evidence"] not in evidence_items:
+                evidence_items.append(issue["evidence"])
+
+        existing["severity"] = _max_severity(existing.get("severity", "low"), issue.get("severity", "low"))
+        existing["details"] = _merge_text(existing.get("details", ""), issue.get("details", ""))
+        existing["recommendation"] = _merge_text(existing.get("recommendation", ""), issue.get("recommendation", ""))
+        existing["evidence"] = " | ".join(existing.get("evidence_items", [])[:4])
+
+    deduped_issues = list(deduped.values())
+    return deduped_issues, {
+        "raw_issue_count": len(issues),
+        "merged_issue_count": merged_issue_count,
+        "unique_issue_count": len(deduped_issues),
+    }
+
+
+def _issue_dedup_key(issue: dict) -> str:
+    title = str(issue.get("title", "")).strip().lower()
+    category = str(issue.get("category", "")).strip().lower()
+
+    if title.startswith("robots.txt discloses sensitive path hints"):
+        return f"{category}|robots_disclosure"
+    if title.startswith("sitemap.xml lists potentially sensitive url"):
+        return f"{category}|sitemap_disclosure"
+
+    return "|".join([category, title, str(issue.get("recommendation", "")).strip().lower()])
+
+
+def _max_severity(left: str, right: str) -> str:
+    order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    return left if order.get(left, 0) >= order.get(right, 0) else right
+
+
+def _merge_text(left: str, right: str) -> str:
+    if not left:
+        return right
+    if not right or right == left:
+        return left
+    return f"{left} Also observed: {right}"
 
 
 def _format_probe_evidence(item: dict) -> str:

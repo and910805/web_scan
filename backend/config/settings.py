@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(
     DJANGO_DEBUG=(bool, False),
-    DEFAULT_USER_CREDITS=(int, 10),
+    DEFAULT_USER_CREDITS=(int, 1),
 )
 environ.Env.read_env(BASE_DIR.parent / ".env")
 

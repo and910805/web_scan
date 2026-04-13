@@ -29,6 +29,10 @@ Current checks include:
 - common API/docs paths such as `/swagger` and `/openapi.json`
 - basic CORS signals for API scans
 - historical comparison against the previous completed scan
+- API schema analysis for exposed OpenAPI or Swagger documents
+- ignore rules for accepted findings
+- scheduled rescans
+- notification hooks for scan completion
 
 This is not a full OWASP scanner yet. It is a lightweight async weak-scan platform intended to be extended.
 
@@ -120,7 +124,7 @@ DJANGO_SECRET_KEY=<your-secret>
 DJANGO_DEBUG=False
 DJANGO_ALLOWED_HOSTS=your-backend-domain
 CORS_ALLOWED_ORIGINS=https://your-frontend-domain
-DEFAULT_USER_CREDITS=10
+DEFAULT_USER_CREDITS=1
 ```
 
 Notes:
@@ -150,7 +154,7 @@ CELERY_RESULT_BACKEND=redis://:<password>@<host>:<port>/1
 DJANGO_SECRET_KEY=<same-secret-as-web>
 DJANGO_DEBUG=False
 DJANGO_ALLOWED_HOSTS=your-backend-domain
-DEFAULT_USER_CREDITS=10
+DEFAULT_USER_CREDITS=1
 CELERY_CONCURRENCY=4
 ```
 
@@ -210,6 +214,21 @@ Available endpoints:
 - `POST /api/auth/google/`
 - `GET /api/auth/me/`
 
+Scan management endpoints:
+
+- `GET /api/scans/`
+- `POST /api/scans/`
+- `GET /api/scans/trends/`
+- `GET /api/scans/{id}/`
+- `GET /api/scans/{id}/report/`
+- `GET /api/ignore-rules/`
+- `POST /api/ignore-rules/`
+- `GET /api/scheduled-scans/`
+- `POST /api/scheduled-scans/`
+- `POST /api/scheduled-scans/run_due/`
+- `GET /api/notification-hooks/`
+- `POST /api/notification-hooks/`
+
 Frontend pages:
 
 - `/login`
@@ -240,7 +259,15 @@ Use the generated client id in both:
 ## Credits
 
 - each scan deducts 1 credit
-- new users receive `DEFAULT_USER_CREDITS`
+- new users receive `DEFAULT_USER_CREDITS` and the default starter value is `1`
+
+## Scheduled Scan Runner
+
+To enqueue due recurring scans manually:
+
+```bash
+python backend/manage.py run_scheduled_scans
+```
 
 ## Payment Webhook
 

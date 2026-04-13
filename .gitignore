@@ -12,3 +12,5 @@ staticfiles/
 .pytest_cache/
 .mypy_cache/
 bin/
+frontend/.next/
+frontend/node_modules/

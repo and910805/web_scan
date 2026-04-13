@@ -1,8 +1,9 @@
+import requests
 from celery import shared_task
 from django.core.files import File
 from django.utils import timezone
 
-from .models import ScanJob
+from .models import IgnoreRule, NotificationHook, ScanJob, ScheduledScan
 from .reports import generate_scan_pdf
 from .scanner import run_target_scan
 
@@ -17,6 +18,7 @@ def scan_project(self, scan_job_id: int) -> dict:
 
     try:
         findings = run_target_scan(scan_job.scan_type, scan_job.target_url)
+        findings = _apply_ignore_rules(findings, scan_job)
         previous_job = _get_previous_completed_scan(scan_job)
         findings = _apply_history_comparison(findings, previous_job)
         scan_job.findings = findings
@@ -42,6 +44,7 @@ def scan_project(self, scan_job_id: int) -> dict:
                 "updated_at",
             ]
         )
+        _notify_hooks(scan_job)
         return findings
     except Exception as exc:
         scan_job.status = ScanJob.Status.FAILED
@@ -49,6 +52,35 @@ def scan_project(self, scan_job_id: int) -> dict:
         scan_job.finished_at = timezone.now()
         scan_job.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
         raise
+
+
+@shared_task(bind=True, autoretry_for=(), retry_backoff=False)
+def run_scheduled_scans(self) -> dict:
+    now = timezone.now()
+    due_scans = list(ScheduledScan.objects.select_related("user").filter(active=True, next_run_at__lte=now))
+    triggered = 0
+
+    for scheduled_scan in due_scans:
+        if scheduled_scan.user.credits < 1:
+            continue
+
+        scheduled_scan.user.credits -= 1
+        scheduled_scan.user.save(update_fields=["credits"])
+
+        scan_job = ScanJob.objects.create(
+            user=scheduled_scan.user,
+            project_name=scheduled_scan.project_name,
+            scan_type=scheduled_scan.scan_type,
+            target_url=scheduled_scan.target_url,
+        )
+        scan_project.delay(scan_job.id)
+
+        scheduled_scan.last_run_at = now
+        scheduled_scan.schedule_next_run(reference=now)
+        scheduled_scan.save(update_fields=["last_run_at", "next_run_at", "updated_at"])
+        triggered += 1
+
+    return {"triggered": triggered}
 
 
 def _get_previous_completed_scan(scan_job: ScanJob) -> ScanJob | None:
@@ -115,6 +147,64 @@ def _apply_history_comparison(findings: dict, previous_job: ScanJob | None) -> d
         }
     )
     return findings
+
+
+def _apply_ignore_rules(findings: dict, scan_job: ScanJob) -> dict:
+    issues = findings.get("issues", [])
+    ignore_rules = list(IgnoreRule.objects.filter(user=scan_job.user, active=True))
+
+    kept_issues = []
+    ignored_issues = []
+    for issue in issues:
+        matched_rule = next((rule for rule in ignore_rules if rule.matches(issue, scan_job.target_url)), None)
+        if matched_rule:
+            ignored_issues.append(
+                {
+                    "category": issue.get("category", ""),
+                    "severity": issue.get("severity", ""),
+                    "title": issue.get("title", ""),
+                    "ignored_by_rule_id": matched_rule.id,
+                }
+            )
+            continue
+        kept_issues.append(issue)
+
+    findings["issues"] = kept_issues
+    findings["ignored_issues"] = ignored_issues
+    findings.setdefault("summary", {}).update(
+        {
+            "issue_count": len(kept_issues),
+            "critical_count": len([item for item in kept_issues if item.get("severity") == "critical"]),
+            "high_count": len([item for item in kept_issues if item.get("severity") == "high"]),
+            "medium_count": len([item for item in kept_issues if item.get("severity") == "medium"]),
+            "low_count": len([item for item in kept_issues if item.get("severity") == "low"]),
+            "ignored_count": len(ignored_issues),
+        }
+    )
+    return findings
+
+
+def _notify_hooks(scan_job: ScanJob) -> None:
+    hooks = NotificationHook.objects.filter(user=scan_job.user, active=True, on_scan_completed=True)
+    payload = {
+        "scan_job_id": scan_job.id,
+        "project_name": scan_job.project_name,
+        "scan_type": scan_job.scan_type,
+        "target_url": scan_job.target_url,
+        "status": scan_job.status,
+        "summary": scan_job.result_summary,
+    }
+
+    for hook in hooks:
+        try:
+            response = requests.post(hook.target_url, json=payload, timeout=10)
+            hook.last_status_code = response.status_code
+            hook.last_error = ""
+        except Exception as exc:
+            hook.last_status_code = None
+            hook.last_error = str(exc)
+        hook.last_triggered_at = timezone.now()
+        hook.save(update_fields=["last_status_code", "last_error", "last_triggered_at", "updated_at"])
 
 
 def _issue_key(issue: dict) -> str:

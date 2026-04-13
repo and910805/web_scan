@@ -35,6 +35,20 @@ export function getStoredAccessToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY) ?? "";
 }
 
+export function getStoredRefreshToken() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return localStorage.getItem(REFRESH_TOKEN_KEY) ?? "";
+}
+
+export function updateStoredAccessToken(access: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  localStorage.setItem(ACCESS_TOKEN_KEY, access);
+}
+
 export function getStoredUser(): AuthUser | null {
   if (typeof window === "undefined") {
     return null;
@@ -49,4 +63,32 @@ export function getStoredUser(): AuthUser | null {
   } catch {
     return null;
   }
+}
+
+export async function refreshAccessToken(apiBaseUrl: string) {
+  const refresh = getStoredRefreshToken();
+  if (!refresh) {
+    clearAuth();
+    return "";
+  }
+
+  const response = await fetch(`${apiBaseUrl}/auth/token/refresh/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh }),
+  });
+
+  if (!response.ok) {
+    clearAuth();
+    return "";
+  }
+
+  const payload = (await response.json()) as { access?: string };
+  if (!payload.access) {
+    clearAuth();
+    return "";
+  }
+
+  updateStoredAccessToken(payload.access);
+  return payload.access;
 }
