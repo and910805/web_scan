@@ -48,6 +48,7 @@ export default function HomePage() {
   const [job, setJob] = useState<ScanJob | null>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
@@ -113,6 +114,44 @@ export default function HomePage() {
       setError(submitError instanceof Error ? submitError.message : "發生未知錯誤");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDownloadReport() {
+    const activeToken = manualToken.trim() || token;
+    if (!job?.id || !activeToken) {
+      setError("請先登入後再下載 PDF 報告。");
+      return;
+    }
+
+    setDownloading(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/scans/${job.id}/report/`, {
+        headers: {
+          Authorization: `Bearer ${activeToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`PDF 下載失敗。HTTP ${response.status}${text ? `: ${text.slice(0, 120)}` : ""}`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `scan-report-${job.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "PDF 下載失敗。");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -336,14 +375,14 @@ export default function HomePage() {
                 <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">掃描狀態與結果</h2>
               </div>
               {job?.report_file ? (
-                <a
-                  href={`${API_BASE_URL}/scans/${job.id}/report/`}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={handleDownloadReport}
+                  disabled={downloading}
                   className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm"
                 >
-                  下載 PDF 報告
-                </a>
+                  {downloading ? "下載中..." : "下載 PDF 報告"}
+                </button>
               ) : null}
             </div>
 
