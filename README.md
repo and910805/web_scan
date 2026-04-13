@@ -55,13 +55,15 @@ Example request:
 ## Local Development
 
 1. Copy `.env.example` to `.env`
-2. Start services:
+2. Keep real secrets only in local env files such as `.env` or `.env.local`
+3. Do not commit or push any file that contains real credentials, tokens, or production URLs. Only commit `.env.example` with placeholder values.
+4. Start services:
 
 ```bash
 docker compose up --build
 ```
 
-3. Run migrations and create an admin user:
+5. Run migrations and create an admin user:
 
 ```bash
 docker compose exec web python manage.py migrate
