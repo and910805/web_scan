@@ -1,7 +1,7 @@
 "use client";
 
 import Script from "next/script";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 declare global {
   interface Window {
@@ -27,13 +27,14 @@ type Props = {
 export function GoogleLoginButton({ clientId, onCredential }: Props) {
   const buttonRef = useRef<HTMLDivElement | null>(null);
   const onCredentialRef = useRef(onCredential);
+  const [scriptLoaded, setScriptLoaded] = useState(false);
 
   useEffect(() => {
     onCredentialRef.current = onCredential;
   }, [onCredential]);
 
   useEffect(() => {
-    if (!clientId || !window.google || !buttonRef.current) {
+    if (!clientId || !scriptLoaded || !window.google || !buttonRef.current) {
       return;
     }
 
@@ -49,11 +50,15 @@ export function GoogleLoginButton({ clientId, onCredential }: Props) {
       shape: "pill",
       width: "320",
     });
-  }, [clientId]);
+  }, [clientId, scriptLoaded]);
 
   return (
     <>
-      <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
+      <Script
+        src="https://accounts.google.com/gsi/client"
+        strategy="afterInteractive"
+        onLoad={() => setScriptLoaded(true)}
+      />
       <div ref={buttonRef} className="min-h-11" />
     </>
   );

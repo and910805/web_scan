@@ -54,7 +54,6 @@ export default function LoginPage() {
       if (!response.ok) {
         throw new Error(payload.detail ?? "登入失敗");
       }
-
       if (!payload.access || !payload.refresh) {
         throw new Error("登入回應缺少 token。");
       }
@@ -71,6 +70,7 @@ export default function LoginPage() {
 
   async function handleGoogleLogin(credential: string) {
     setError("");
+
     try {
       const response = await fetch(`${API_BASE_URL}/auth/google/`, {
         method: "POST",
@@ -84,6 +84,7 @@ export default function LoginPage() {
       if (!payload.tokens?.access || !payload.tokens?.refresh || !payload.user) {
         throw new Error("Google 登入回應格式不完整。");
       }
+
       storeAuth(payload.tokens, payload.user);
       router.push("/");
     } catch (submitError) {
@@ -98,7 +99,7 @@ export default function LoginPage() {
           <p className="text-xs font-bold uppercase tracking-[0.35em] text-[var(--accent)]">WeakScan Login</p>
           <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">登入弱掃平台</h1>
           <p className="mt-4 max-w-xl text-base leading-7 text-slate-600">
-            登入後即可提交掃描任務、查看 credit、下載 PDF 報告。支援帳號密碼與 Google 登入。
+            登入後即可提交掃描任務、查看 credit、下載 PDF 報告，支援帳號密碼與 Google 登入。
           </p>
           <div className="mt-8 rounded-[1.5rem] bg-slate-950 p-6 text-white">
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-orange-300">登入後可用</p>
@@ -180,7 +181,7 @@ async function readApiPayload(response: Response) {
   const text = await response.text();
 
   try {
-    return JSON.parse(text) as Record<string, any>;
+    return JSON.parse(text) as Record<string, unknown>;
   } catch {
     throw new Error(`後端回傳了非 JSON 內容，請檢查 API 狀態。HTTP ${response.status}`);
   }

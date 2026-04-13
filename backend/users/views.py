@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.utils.crypto import get_random_string
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from rest_framework import permissions, status
@@ -83,7 +84,7 @@ class GoogleLoginView(APIView):
             user = User.objects.create_user(
                 username=candidate,
                 email=email,
-                password=User.objects.make_random_password(),
+                password=get_random_string(32),
                 auth_provider=User.AuthProvider.GOOGLE,
                 google_sub=sub,
             )
