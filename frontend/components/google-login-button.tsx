@@ -26,6 +26,11 @@ type Props = {
 
 export function GoogleLoginButton({ clientId, onCredential }: Props) {
   const buttonRef = useRef<HTMLDivElement | null>(null);
+  const onCredentialRef = useRef(onCredential);
+
+  useEffect(() => {
+    onCredentialRef.current = onCredential;
+  }, [onCredential]);
 
   useEffect(() => {
     if (!clientId || !window.google || !buttonRef.current) {
@@ -35,7 +40,7 @@ export function GoogleLoginButton({ clientId, onCredential }: Props) {
     buttonRef.current.innerHTML = "";
     window.google.accounts.id.initialize({
       client_id: clientId,
-      callback: ({ credential }) => onCredential(credential),
+      callback: ({ credential }) => onCredentialRef.current(credential),
     });
     window.google.accounts.id.renderButton(buttonRef.current, {
       theme: "outline",
@@ -44,7 +49,7 @@ export function GoogleLoginButton({ clientId, onCredential }: Props) {
       shape: "pill",
       width: "320",
     });
-  }, [clientId, onCredential]);
+  }, [clientId]);
 
   return (
     <>

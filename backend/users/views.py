@@ -56,11 +56,14 @@ class GoogleLoginView(APIView):
         serializer = GoogleLoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        token_info = id_token.verify_oauth2_token(
-            serializer.validated_data["credential"],
-            google_requests.Request(),
-            settings.GOOGLE_OAUTH_CLIENT_ID,
-        )
+        try:
+            token_info = id_token.verify_oauth2_token(
+                serializer.validated_data["credential"],
+                google_requests.Request(),
+                settings.GOOGLE_OAUTH_CLIENT_ID,
+            )
+        except Exception:
+            return Response({"detail": "Google 登入驗證失敗。"}, status=status.HTTP_400_BAD_REQUEST)
 
         if token_info.get("email_verified") is not True:
             return Response({"detail": "Google 帳號 Email 尚未驗證。"}, status=status.HTTP_400_BAD_REQUEST)

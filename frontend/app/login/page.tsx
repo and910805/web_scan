@@ -21,10 +21,11 @@ export default function LoginPage() {
     const response = await fetch(`${API_BASE_URL}/auth/me/`, {
       headers: { Authorization: `Bearer ${access}` },
     });
+    const payload = await readApiPayload(response);
     if (!response.ok) {
-      throw new Error("無法取得使用者資料");
+      throw new Error(payload.detail ?? "無法取得使用者資料");
     }
-    return response.json();
+    return payload;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -38,7 +39,7 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok) {
         throw new Error(payload.detail ?? "登入失敗");
       }
@@ -61,7 +62,7 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credential }),
       });
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok) {
         throw new Error(payload.detail ?? "Google 登入失敗");
       }
@@ -155,4 +156,14 @@ function AuthField({ label, children }: { label: string; children: React.ReactNo
       {children}
     </label>
   );
+}
+
+async function readApiPayload(response: Response) {
+  const text = await response.text();
+
+  try {
+    return JSON.parse(text) as Record<string, any>;
+  } catch {
+    throw new Error(`後端回傳了非 JSON 內容，請檢查 API 狀態。HTTP ${response.status}`);
+  }
 }
