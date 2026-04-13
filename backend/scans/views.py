@@ -1,4 +1,4 @@
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -40,10 +40,15 @@ class ScanJobViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.Retr
     @action(detail=True, methods=["get"])
     def report(self, request, pk=None):
         scan_job = self.get_object()
+        filename = f"scan-{scan_job.id}.pdf"
+        if scan_job.report_content:
+            response = HttpResponse(scan_job.report_content, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
         if not scan_job.report_file:
             raise Http404("Report not available.")
         return FileResponse(
             scan_job.report_file.open("rb"),
             as_attachment=True,
-            filename=scan_job.report_file.name.rsplit("/", 1)[-1],
+            filename=scan_job.report_file.name.rsplit("/", 1)[-1] or filename,
         )

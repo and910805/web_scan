@@ -24,7 +24,10 @@ def scan_project(self, scan_job_id: int) -> dict:
 
         pdf_path = generate_scan_pdf(scan_job)
         with pdf_path.open("rb") as report_handle:
+            report_bytes = report_handle.read()
+            report_handle.seek(0)
             scan_job.report_file.save(pdf_path.name, File(report_handle), save=False)
+            scan_job.report_content = report_bytes
 
         scan_job.save(
             update_fields=[
@@ -33,6 +36,7 @@ def scan_project(self, scan_job_id: int) -> dict:
                 "status",
                 "finished_at",
                 "report_file",
+                "report_content",
                 "updated_at",
             ]
         )

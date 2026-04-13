@@ -22,6 +22,7 @@ class ScanJob(models.Model):
     result_summary = models.JSONField(default=dict, blank=True)
     error_message = models.TextField(blank=True)
     report_file = models.FileField(upload_to="reports/", blank=True, null=True)
+    report_content = models.BinaryField(blank=True, null=True)
     started_at = models.DateTimeField(blank=True, null=True)
     finished_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
