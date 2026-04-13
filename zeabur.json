@@ -1,0 +1,22 @@
+{
+  "services": [
+    {
+      "name": "security-scanner-web",
+      "source": ".",
+      "dockerfile": "Dockerfile",
+      "env": {
+        "SERVICE_ROLE": "web"
+      },
+      "startCommand": "sh /app/backend/scripts/start-web.sh"
+    },
+    {
+      "name": "security-scanner-worker",
+      "source": ".",
+      "dockerfile": "Dockerfile",
+      "env": {
+        "SERVICE_ROLE": "worker"
+      },
+      "startCommand": "sh /app/backend/scripts/start-worker.sh"
+    }
+  ]
+}
