@@ -1,17 +1,61 @@
-# Security Scanning Platform
+# WeakScan
 
-Production-ready single-repository scaffold for Zeabur:
+WeakScan is a website and API weak-scanning platform built as an async job system.
 
-- `backend/`: Django Rest Framework API, Celery worker, website/API scanning logic, PDF reporting, credit system.
-- `frontend/`: Next.js dashboard for submitting URL scans and polling job status.
-- `scanner/`: Go static analysis CLI kept for future source-code scanning features.
-- `docker-compose.yml`: local dev stack with Postgres, Redis, Django, Celery, and Next.js.
-- `Dockerfile`: Python runtime for Django and Celery.
+- `backend/`: Django + DRF API, Celery tasks, credits, PDF reporting
+- `frontend/`: Next.js dashboard for submitting scans and polling status
+- `scanner/`: reserved for future source-code scanning work
+- `Dockerfile`: backend image for Django web and Celery worker
+- `docker-compose.yml`: local development stack
 
-## Local development
+## What It Does
 
-1. Copy `.env.example` to `.env` and adjust values.
-2. Start the stack:
+Current scan modes:
+
+- `web`: baseline website checks
+- `api`: baseline API checks
+
+Current checks include:
+
+- HTTP status and response inspection
+- security headers
+- TLS certificate inspection
+- common sensitive paths such as `/.env` and `/.git/config`
+- common discovery files such as `robots.txt` and `sitemap.xml`
+- common API/docs paths such as `/swagger` and `/openapi.json`
+- basic CORS signals for API scans
+
+This is not a full OWASP scanner yet. It is a lightweight async weak-scan platform intended to be extended.
+
+## Architecture
+
+- `frontend` sends scan requests to Django
+- Django creates a `ScanJob`
+- Celery worker runs the scan in the background
+- results are stored in PostgreSQL
+- PDF report is generated and exposed through the API
+
+## API Flow
+
+1. Authenticate with JWT via `POST /api/auth/token/`
+2. Submit a scan via `POST /api/scans/`
+3. Poll `GET /api/scans/{id}/`
+4. Download `GET /api/scans/{id}/report/`
+
+Example request:
+
+```json
+{
+  "project_name": "customer-portal",
+  "scan_type": "web",
+  "target_url": "https://example.com"
+}
+```
+
+## Local Development
+
+1. Copy `.env.example` to `.env`
+2. Start services:
 
 ```bash
 docker compose up --build
@@ -24,63 +68,142 @@ docker compose exec web python manage.py migrate
 docker compose exec web python manage.py createsuperuser
 ```
 
-API base URL: `http://localhost:8000/api/`
-Frontend URL: `http://localhost:3000/`
+Local URLs:
 
-## API flow
+- Frontend: `http://localhost:3000`
+- Backend API: `http://localhost:8000/api`
 
-1. Authenticate with JWT via `POST /api/auth/token/`.
-2. `POST /api/scans/` with `project_name`, `scan_type`, and `target_url`.
-3. Poll `GET /api/scans/{id}/` until status becomes `completed` or `failed`.
-4. Download the PDF report from `GET /api/scans/{id}/report/`.
+## Zeabur Deployment
 
-Example request:
-
-```json
-{
-  "project_name": "customer-portal",
-  "scan_type": "web",
-  "target_url": "https://example.com"
-}
-```
-
-Web scans currently check:
-
-- HTTP response and security headers
-- TLS certificate status
-- Sensitive paths such as `/.env` and `/.git/config`
-- Common files such as `robots.txt` and `sitemap.xml`
-- Common API surface such as `/swagger` and `/openapi.json`
-- Basic CORS signals for API scans
-
-## Zeabur deployment
-
-Provision these services in Zeabur:
+Create these services first:
 
 1. `PostgreSQL`
 2. `Redis`
-3. `security-scanner-web` from this repo using `Dockerfile`
-4. `security-scanner-worker` from this repo using `Dockerfile`
-5. `security-scanner-frontend` from `frontend/`
 
-Recommended start commands:
+Then create these app services:
 
-- Web: `sh /app/backend/scripts/start-web.sh`
-- Worker: `sh /app/backend/scripts/start-worker.sh`
+1. `web`
+2. `worker`
+3. `frontend`
+
+### Web Service
+
+- Root Directory: `/`
+- Build source: repository root
+- Uses repo root `Dockerfile`
+- Public: yes
+- Start Command:
+
+```bash
+sh /app/backend/scripts/start-web.sh
+```
+
+Required env:
+
+```env
+DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/<db>
+REDIS_URL=redis://:<password>@<host>:<port>/0
+CELERY_BROKER_URL=redis://:<password>@<host>:<port>/0
+CELERY_RESULT_BACKEND=redis://:<password>@<host>:<port>/1
+DJANGO_SECRET_KEY=<your-secret>
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=your-backend-domain
+CORS_ALLOWED_ORIGINS=https://your-frontend-domain
+DEFAULT_USER_CREDITS=10
+```
+
+Notes:
+
+- `DJANGO_ALLOWED_HOSTS` does not include `https://`
+- `CORS_ALLOWED_ORIGINS` must include `https://`
+
+### Worker Service
+
+- Root Directory: `/`
+- Build source: repository root
+- Uses repo root `Dockerfile`
+- Public: no
+- Start Command:
+
+```bash
+sh /app/backend/scripts/start-worker.sh
+```
+
+Required env:
+
+```env
+DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/<db>
+REDIS_URL=redis://:<password>@<host>:<port>/0
+CELERY_BROKER_URL=redis://:<password>@<host>:<port>/0
+CELERY_RESULT_BACKEND=redis://:<password>@<host>:<port>/1
+DJANGO_SECRET_KEY=<same-secret-as-web>
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=your-backend-domain
+DEFAULT_USER_CREDITS=10
+CELERY_CONCURRENCY=4
+```
+
+### Frontend Service
+
+- Root Directory: `frontend`
+- Build source: `frontend/`
+- Public: yes
+- Do not use repo root `Dockerfile`
+- Start Command:
+
+```bash
+npm run start -- --hostname 0.0.0.0 --port 8080
+```
+
+Required env:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=https://your-backend-domain/api
+```
 
 Important notes:
 
-- Keep `CELERY_CONCURRENCY=4` for the 2 vCPU / 4 GB instance.
-- Set shared environment variables for both backend services, especially `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, and `CORS_ALLOWED_ORIGINS`.
-- For the frontend, set `NEXT_PUBLIC_API_BASE_URL` to your Django API URL.
-- Use the plain PostgreSQL URI format with Django, for example `postgresql://root:password@host:port/database`.
+- If you run `next start` directly and see `/bin/sh: 1: next: not found`, use `npm run start -- --hostname 0.0.0.0 --port 8080`
+- The frontend service must use `frontend` as its Root Directory
 
-## Default credits
+## Example Zeabur Mapping
 
-- New users receive credits from `DEFAULT_USER_CREDITS`.
-- Each scan request consumes one credit through the `deduct_credit` decorator.
+If your domains are:
 
-## ECPay placeholder
+- frontend: `https://web-scan-front.zeabur.app`
+- backend: `https://web-scan-web.zeabur.app`
 
-- `POST /api/payments/ecpay/webhook/` exists as a placeholder endpoint.
-- You still need to add signature validation and credit top-up logic before using it in production.
+Then use:
+
+```env
+DJANGO_ALLOWED_HOSTS=web-scan-web.zeabur.app
+CORS_ALLOWED_ORIGINS=https://web-scan-front.zeabur.app
+NEXT_PUBLIC_API_BASE_URL=https://web-scan-web.zeabur.app/api
+```
+
+## Credits
+
+- each scan deducts 1 credit
+- new users receive `DEFAULT_USER_CREDITS`
+
+## Payment Webhook
+
+Placeholder endpoint:
+
+- `POST /api/payments/ecpay/webhook/`
+
+This endpoint exists, but production-safe ECPay validation and credit top-up logic still need to be implemented.
+
+## Current Limits
+
+- current scanner is baseline only
+- no OWASP ZAP integration yet
+- no SonarQube-style source-code scanning yet
+- frontend currently expects a JWT access token pasted manually
+
+## Next Recommended Steps
+
+1. Add a proper login flow in the frontend
+2. Add OWASP ZAP integration as an advanced scan mode
+3. Add issue detail pages instead of summary-only reporting
+4. Add payment top-up logic for credits
