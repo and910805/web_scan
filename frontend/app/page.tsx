@@ -164,7 +164,8 @@ export default function HomePage() {
   }
 
   const statusTone = getStatusTone(job?.status);
-  const canSubmit = Boolean(getActiveToken(manualToken));
+  const activeToken = typeof window === "undefined" ? manualToken.trim() : getActiveToken(manualToken);
+  const canSubmit = Boolean(activeToken);
 
   return (
     <main className="relative overflow-hidden px-4 py-6 sm:px-6 lg:px-10">

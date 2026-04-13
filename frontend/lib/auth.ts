@@ -11,22 +11,34 @@ export type AuthUser = {
 };
 
 export function storeAuth(tokens: { access: string; refresh: string }, user: AuthUser) {
+  if (typeof window === "undefined") {
+    return;
+  }
   localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access);
   localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearAuth() {
+  if (typeof window === "undefined") {
+    return;
+  }
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 }
 
 export function getStoredAccessToken() {
+  if (typeof window === "undefined") {
+    return "";
+  }
   return localStorage.getItem(ACCESS_TOKEN_KEY) ?? "";
 }
 
 export function getStoredUser(): AuthUser | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) {
     return null;
