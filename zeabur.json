@@ -17,6 +17,11 @@
         "SERVICE_ROLE": "worker"
       },
       "startCommand": "sh /app/backend/scripts/start-worker.sh"
+    },
+    {
+      "name": "security-scanner-frontend",
+      "source": "frontend",
+      "dockerfile": "Dockerfile"
     }
   ]
 }

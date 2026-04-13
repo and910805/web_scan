@@ -162,13 +162,10 @@ CELERY_CONCURRENCY=4
 
 - Root Directory: `frontend`
 - Build source: `frontend/`
+- Use the `frontend/Dockerfile`
 - Public: yes
 - Do not use repo root `Dockerfile`
-- Start Command:
-
-```bash
-npm run start -- --hostname 0.0.0.0 --port 8080
-```
+- Start command is already defined by the frontend Docker image
 
 Required env:
 
@@ -179,8 +176,9 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-oauth-client-id
 
 Important notes:
 
-- If you run `next start` directly and see `/bin/sh: 1: next: not found`, use `npm run start -- --hostname 0.0.0.0 --port 8080`
-- The frontend service must use `frontend` as its Root Directory
+- The frontend service should be deployed through `zeabur.json` or by explicitly selecting `frontend/Dockerfile`
+- This avoids Zeabur Node auto-detection paths that may try to run `npm update -g npm`
+- If you create the service manually, keep `frontend` as the Root Directory
 
 ## Example Zeabur Mapping
 
