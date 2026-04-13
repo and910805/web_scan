@@ -1,6 +1,7 @@
 from django.test import SimpleTestCase
 
 from .scanner import _analyze_robots, _analyze_sitemap, _calculate_risk_score, _inspect_cookie_security
+from .tasks import _apply_history_comparison
 
 
 class ScannerHelperTests(SimpleTestCase):
@@ -63,3 +64,56 @@ class ScannerHelperTests(SimpleTestCase):
         ]
 
         self.assertEqual(_calculate_risk_score(issues), 71)
+
+    def test_history_comparison_marks_new_persistent_and_resolved(self):
+        findings = {
+            "summary": {"issue_count": 2},
+            "issues": [
+                {
+                    "category": "tls",
+                    "severity": "high",
+                    "title": "TLS certificate expires soon",
+                    "details": "Certificate expires in 10 days.",
+                },
+                {
+                    "category": "cookie_security",
+                    "severity": "medium",
+                    "title": "Cookie missing HttpOnly attribute",
+                    "details": "A session cookie is readable by client-side scripts.",
+                },
+            ],
+        }
+        previous_job = type(
+            "PreviousJob",
+            (),
+            {
+                "id": 7,
+                "finished_at": None,
+                "findings": {
+                    "issues": [
+                        {
+                            "category": "tls",
+                            "severity": "high",
+                            "title": "TLS certificate expires soon",
+                            "details": "Certificate expires in 10 days.",
+                        },
+                        {
+                            "category": "information_disclosure",
+                            "severity": "low",
+                            "title": "Server banner exposed",
+                            "details": "The application discloses the Server response header.",
+                        },
+                    ]
+                },
+            },
+        )()
+
+        result = _apply_history_comparison(findings, previous_job)
+
+        self.assertEqual(result["summary"]["new_count"], 1)
+        self.assertEqual(result["summary"]["persistent_count"], 1)
+        self.assertEqual(result["summary"]["resolved_count"], 1)
+        self.assertEqual(result["summary"]["compared_to_job_id"], 7)
+        self.assertEqual(result["issues"][0]["history_status"], "persistent")
+        self.assertEqual(result["issues"][1]["history_status"], "new")
+        self.assertEqual(result["history"]["resolved_findings"][0]["title"], "Server banner exposed")

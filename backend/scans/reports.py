@@ -58,6 +58,7 @@ def generate_scan_pdf(scan_job: ScanJob) -> Path:
     findings = scan_job.findings or {}
     summary = findings.get("summary", {})
     issues = _sorted_issues(findings.get("issues", []))
+    history = findings.get("history", {})
     target = findings.get("target", {})
     http_info = findings.get("http", {})
     tls = findings.get("tls", {})
@@ -70,6 +71,8 @@ def generate_scan_pdf(scan_job: ScanJob) -> Path:
         Paragraph("Executive Summary", styles["section_title"]),
         Spacer(1, 2 * mm),
         _summary_cards(summary, styles),
+        Spacer(1, 5 * mm),
+        _history_cards(history, styles),
         Spacer(1, 5 * mm),
         _asset_overview(scan_job, target, http_info, tls, security_headers, styles),
         Spacer(1, 5 * mm),
@@ -288,6 +291,18 @@ def _summary_cards(summary: dict, styles: dict) -> Table:
     return table
 
 
+def _history_cards(history: dict, styles: dict) -> Table:
+    baseline = "Compared to previous completed scan" if history.get("comparison_available") else "No earlier baseline yet"
+    cards = [
+        _metric_card("New Findings", history.get("new_count", 0), baseline, styles),
+        _metric_card("Persistent", history.get("persistent_count", 0), "Still present after comparison", styles),
+        _metric_card("Resolved", history.get("resolved_count", 0), "Present before, absent now", styles),
+    ]
+    table = Table([cards], colWidths=[59 * mm, 59 * mm, 59 * mm], hAlign="LEFT")
+    table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    return table
+
+
 def _metric_card(label: str, value: int, hint: str, styles: dict) -> Table:
     table = Table(
         [
@@ -424,7 +439,9 @@ def _finding_card(index: int, issue: dict, styles: dict) -> list:
             [
                 "",
                 Paragraph(
-                    escape(f"Category: {_category_label(issue.get('category'))}"),
+                    escape(
+                        f"Category: {_category_label(issue.get('category'))} | Trend: {_title_case(issue.get('history_status', 'new'))}"
+                    ),
                     styles["finding_meta"],
                 ),
             ],

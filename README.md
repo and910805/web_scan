@@ -20,12 +20,21 @@ Current checks include:
 - HTTP status and response inspection
 - security headers
 - TLS certificate inspection
+- cookie attribute checks (`Secure`, `HttpOnly`, `SameSite`)
+- dangerous HTTP method detection
+- HTTP to HTTPS redirect checks
+- verbose error disclosure checks
 - common sensitive paths such as `/.env` and `/.git/config`
 - common discovery files such as `robots.txt` and `sitemap.xml`
 - common API/docs paths such as `/swagger` and `/openapi.json`
 - basic CORS signals for API scans
+- historical comparison against the previous completed scan
 
 This is not a full OWASP scanner yet. It is a lightweight async weak-scan platform intended to be extended.
+
+Roadmap and implementation status:
+
+- see [ROADMAP.md](./ROADMAP.md)
 
 ## Architecture
 
