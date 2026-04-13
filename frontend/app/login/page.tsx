@@ -5,10 +5,21 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { GoogleLoginButton } from "@/components/google-login-button";
-import { storeAuth } from "@/lib/auth";
+import { AuthUser, storeAuth } from "@/lib/auth";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
+
+type TokenPair = {
+  access: string;
+  refresh: string;
+};
+
+type GoogleLoginResponse = {
+  tokens: TokenPair;
+  user: AuthUser;
+  detail?: string;
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,11 +32,11 @@ export default function LoginPage() {
     const response = await fetch(`${API_BASE_URL}/auth/me/`, {
       headers: { Authorization: `Bearer ${access}` },
     });
-    const payload = await readApiPayload(response);
+    const payload = (await readApiPayload(response)) as Partial<AuthUser> & { detail?: string };
     if (!response.ok) {
       throw new Error(payload.detail ?? "無法取得使用者資料");
     }
-    return payload;
+    return payload as AuthUser;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -39,13 +50,17 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      const payload = await readApiPayload(response);
+      const payload = (await readApiPayload(response)) as Partial<TokenPair> & { detail?: string };
       if (!response.ok) {
         throw new Error(payload.detail ?? "登入失敗");
       }
 
+      if (!payload.access || !payload.refresh) {
+        throw new Error("登入回應缺少 token。");
+      }
+
       const user = await fetchProfile(payload.access);
-      storeAuth(payload, user);
+      storeAuth({ access: payload.access, refresh: payload.refresh }, user);
       router.push("/");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "登入失敗");
@@ -62,9 +77,12 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credential }),
       });
-      const payload = await readApiPayload(response);
+      const payload = (await readApiPayload(response)) as GoogleLoginResponse;
       if (!response.ok) {
         throw new Error(payload.detail ?? "Google 登入失敗");
+      }
+      if (!payload.tokens?.access || !payload.tokens?.refresh || !payload.user) {
+        throw new Error("Google 登入回應格式不完整。");
       }
       storeAuth(payload.tokens, payload.user);
       router.push("/");
