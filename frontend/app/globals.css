@@ -37,3 +37,31 @@ select,
 button {
   font: inherit;
 }
+
+.dark-field {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.dark-field:focus {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark-field option {
+  background: #0f172a;
+  color: #fff;
+}
+
+input.dark-field:-webkit-autofill,
+input.dark-field:-webkit-autofill:hover,
+input.dark-field:-webkit-autofill:focus,
+textarea.dark-field:-webkit-autofill,
+textarea.dark-field:-webkit-autofill:hover,
+textarea.dark-field:-webkit-autofill:focus,
+select.dark-field:-webkit-autofill,
+select.dark-field:-webkit-autofill:hover,
+select.dark-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff;
+  -webkit-box-shadow: 0 0 0 1000px #1e293b inset;
+  transition: background-color 9999s ease-in-out 0s;
+}

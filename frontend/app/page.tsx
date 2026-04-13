@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import { FormEvent, useEffect, useState } from "react";
 
 import { AuthUser, clearAuth, getStoredAccessToken, getStoredUser } from "@/lib/auth";
 
@@ -41,6 +41,7 @@ const capabilityCards = [
 
 export default function HomePage() {
   const [token, setToken] = useState("");
+  const [manualToken, setManualToken] = useState("");
   const [projectName, setProjectName] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
   const [scanType, setScanType] = useState<"web" | "api">("web");
@@ -50,7 +51,9 @@ export default function HomePage() {
   const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
-    setToken(getStoredAccessToken());
+    const storedToken = getStoredAccessToken();
+    setToken(storedToken);
+    setManualToken(storedToken);
     setUser(getStoredUser());
   }, []);
 
@@ -75,30 +78,37 @@ export default function HomePage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const activeToken = manualToken.trim() || token;
+    if (!activeToken) {
+      setError("請先登入，或在進階設定中手動填入 JWT 後再建立掃描任務。");
+      return;
+    }
+
     setSubmitting(true);
     setError("");
 
     try {
+      const resolvedProjectName = projectName.trim() || deriveProjectName(targetUrl);
       const response = await fetch(`${API_BASE_URL}/scans/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${activeToken}`,
         },
         body: JSON.stringify({
-          project_name: projectName,
+          project_name: resolvedProjectName,
           scan_type: scanType,
           target_url: targetUrl,
         }),
       });
 
+      const payload = await response.json();
       if (!response.ok) {
-        const payload = (await response.json()) as { detail?: string };
         throw new Error(payload.detail ?? "掃描任務建立失敗");
       }
 
-      const createdJob = (await response.json()) as ScanJob;
-      setJob(createdJob);
+      setJob(payload as ScanJob);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "發生未知錯誤");
     } finally {
@@ -107,6 +117,7 @@ export default function HomePage() {
   }
 
   const statusTone = getStatusTone(job?.status);
+  const canSubmit = Boolean(manualToken.trim() || token);
 
   return (
     <main className="relative overflow-hidden px-4 py-6 sm:px-6 lg:px-10">
@@ -131,6 +142,7 @@ export default function HomePage() {
                   onClick={() => {
                     clearAuth();
                     setToken("");
+                    setManualToken("");
                     setUser(null);
                   }}
                   className="rounded-full border border-slate-300 px-4 py-2 font-semibold text-slate-900"
@@ -234,24 +246,44 @@ export default function HomePage() {
             </div>
 
             <div className="mt-8 space-y-5">
-              <Field label="JWT 存取權杖" hint="登入後會自動帶入，也可手動覆蓋。">
-                <textarea
-                  value={token}
-                  onChange={(event) => setToken(event.target.value)}
-                  className="min-h-28 w-full rounded-[1.35rem] border border-white/10 bg-white/6 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70 focus:bg-white/10"
-                  placeholder="請貼上 Bearer Token"
-                  required
-                />
-              </Field>
+              {user ? (
+                <div className="rounded-[1.35rem] border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-100">
+                  已登入為 <span className="font-semibold">{user.username}</span>，系統會自動使用你的登入權杖送出掃描任務。
+                </div>
+              ) : (
+                <div className="rounded-[1.35rem] border border-amber-300/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-100">
+                  你尚未登入。請先前往{" "}
+                  <Link href="/login" className="font-semibold text-amber-200 underline">
+                    登入頁
+                  </Link>{" "}
+                  取得權限後再建立掃描任務。
+                </div>
+              )}
+
+              <details className="rounded-[1.35rem] border border-white/10 bg-white/5 px-4 py-4">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-white">進階設定</summary>
+                <p className="mt-3 text-sm text-slate-400">
+                  如需手動覆蓋登入中的權杖，可在這裡貼上 JWT。一般情況下不需要填寫。
+                </p>
+                <div className="mt-4">
+                  <Field label="JWT 存取權杖" hint="非必填，未填時會自動使用目前登入權杖。">
+                    <textarea
+                      value={manualToken}
+                      onChange={(event) => setManualToken(event.target.value)}
+                      className="dark-field min-h-28 w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70"
+                      placeholder="可留白。只有需要手動覆蓋時才貼上 Bearer Token"
+                    />
+                  </Field>
+                </div>
+              </details>
 
               <div className="grid gap-5 md:grid-cols-2">
-                <Field label="專案名稱" hint="用來標記客戶、網站或系統。">
+                <Field label="專案名稱" hint="可不填，系統會自動用網址主機名帶入。">
                   <input
                     value={projectName}
                     onChange={(event) => setProjectName(event.target.value)}
-                    className="w-full rounded-[1.35rem] border border-white/10 bg-white/6 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70 focus:bg-white/10"
+                    className="dark-field w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70"
                     placeholder="例如：客戶主站"
-                    required
                   />
                 </Field>
 
@@ -259,7 +291,7 @@ export default function HomePage() {
                   <select
                     value={scanType}
                     onChange={(event) => setScanType(event.target.value as "web" | "api")}
-                    className="w-full rounded-[1.35rem] border border-white/10 bg-white/6 px-4 py-3 text-sm text-white outline-none transition focus:border-orange-300/70 focus:bg-white/10"
+                    className="dark-field w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition focus:border-orange-300/70"
                   >
                     <option value="web">網站掃描</option>
                     <option value="api">API 掃描</option>
@@ -272,7 +304,7 @@ export default function HomePage() {
                   type="url"
                   value={targetUrl}
                   onChange={(event) => setTargetUrl(event.target.value)}
-                  className="w-full rounded-[1.35rem] border border-white/10 bg-white/6 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70 focus:bg-white/10"
+                  className="dark-field w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70"
                   placeholder="https://example.com"
                   required
                 />
@@ -282,7 +314,7 @@ export default function HomePage() {
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || !canSubmit}
                 className="inline-flex min-w-40 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f97316_0%,#dc2626_100%)] px-6 py-3.5 text-sm font-bold text-white shadow-[0_12px_34px_rgba(249,115,22,0.32)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting ? "建立中..." : "開始掃描"}
@@ -483,5 +515,13 @@ function getStatusLabel(status: ScanJob["status"]) {
       return "已完成";
     case "failed":
       return "失敗";
+  }
+}
+
+function deriveProjectName(targetUrl: string) {
+  try {
+    return new URL(targetUrl).hostname;
+  } catch {
+    return "未命名掃描";
   }
 }
