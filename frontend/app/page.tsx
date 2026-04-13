@@ -1,6 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
+
+import { AuthUser, clearAuth, getStoredAccessToken, getStoredUser } from "@/lib/auth";
 
 type ScanJob = {
   id: number;
@@ -23,16 +26,16 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 
 const capabilityCards = [
   {
-    title: "Surface Mapping",
-    description: "Probe common API routes, public docs, robots.txt, sitemap.xml, and exposed endpoints.",
+    title: "攻擊面盤點",
+    description: "探測常見 API 路徑、公開文件、robots.txt、sitemap.xml 與外露端點。",
   },
   {
-    title: "Baseline Misconfig Checks",
-    description: "Review security headers, wildcard CORS, sensitive files, and common deployment leaks.",
+    title: "基礎錯誤設定檢查",
+    description: "檢查安全標頭、萬用 CORS、敏感檔案與常見部署外洩風險。",
   },
   {
-    title: "Async Execution",
-    description: "Queue scans to Celery workers so API latency stays stable while checks run in the background.",
+    title: "非同步執行",
+    description: "將掃描排入 Celery worker 佇列，避免 API 因長任務而卡住。",
   },
 ];
 
@@ -44,6 +47,12 @@ export default function HomePage() {
   const [job, setJob] = useState<ScanJob | null>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    setToken(getStoredAccessToken());
+    setUser(getStoredUser());
+  }, []);
 
   useEffect(() => {
     if (!job || !token || !["pending", "running"].includes(job.status)) {
@@ -85,13 +94,13 @@ export default function HomePage() {
 
       if (!response.ok) {
         const payload = (await response.json()) as { detail?: string };
-        throw new Error(payload.detail ?? "Scan request failed");
+        throw new Error(payload.detail ?? "掃描任務建立失敗");
       }
 
       const createdJob = (await response.json()) as ScanJob;
       setJob(createdJob);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Unknown error");
+      setError(submitError instanceof Error ? submitError.message : "發生未知錯誤");
     } finally {
       setSubmitting(false);
     }
@@ -106,56 +115,91 @@ export default function HomePage() {
       <div className="absolute left-[-6rem] top-56 -z-10 h-80 w-80 rounded-full bg-[rgba(190,24,93,0.10)] blur-3xl" />
 
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-6">
+        <nav className="flex items-center justify-between rounded-[1.5rem] border border-white/40 bg-white/50 px-5 py-4 backdrop-blur">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-[0.3em] text-[var(--accent)]">WeakScan</p>
+            <p className="text-sm text-slate-600">網站與 API 弱掃平台</p>
+          </div>
+          <div className="flex items-center gap-3 text-sm">
+            {user ? (
+              <>
+                <span className="rounded-full bg-slate-950 px-4 py-2 font-semibold text-white">
+                  {user.username} / {user.credits} credits
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearAuth();
+                    setToken("");
+                    setUser(null);
+                  }}
+                  className="rounded-full border border-slate-300 px-4 py-2 font-semibold text-slate-900"
+                >
+                  登出
+                </button>
+              </>
+            ) : (
+              <>
+                <Link href="/login" className="rounded-full border border-slate-300 px-4 py-2 font-semibold text-slate-900">
+                  登入
+                </Link>
+                <Link href="/register" className="rounded-full bg-slate-950 px-4 py-2 font-semibold text-white">
+                  註冊
+                </Link>
+              </>
+            )}
+          </div>
+        </nav>
+
         <header className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <section className="rounded-[2rem] border border-white/55 bg-[rgba(255,248,239,0.78)] p-7 shadow-[0_30px_90px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:p-9">
             <div className="inline-flex items-center gap-3 rounded-full border border-black/10 bg-white/70 px-4 py-2 text-xs font-bold uppercase tracking-[0.35em] text-[var(--accent-strong)]">
-              WeakScan Control
+              WeakScan 弱掃控制台
             </div>
             <h1 className="mt-6 max-w-4xl text-4xl font-black leading-none tracking-[-0.04em] text-slate-950 sm:text-6xl">
-              Remote weak scanning for websites and APIs with an operator-grade dashboard.
+              用更接近實戰操作的介面，遠端掃描網站與 API 的弱點風險。
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              Queue a target, let the backend execute probes asynchronously, and review risk signals without forcing the API
-              into long-running requests.
+              輸入目標網址後，系統會在後端非同步執行探測，回傳狀態、風險摘要與報告，不讓 API 被長時間任務拖慢。
             </p>
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
-              <HeroMetric label="Execution Model" value="Celery Queue" />
-              <HeroMetric label="Scan Modes" value="Web + API" />
-              <HeroMetric label="Report Output" value="PDF Export" />
+              <HeroMetric label="執行模式" value="Celery 佇列" />
+              <HeroMetric label="掃描類型" value="網站 + API" />
+              <HeroMetric label="報告輸出" value="PDF 匯出" />
             </div>
           </section>
 
           <section className="rounded-[2rem] border border-slate-800 bg-[#0d1320] p-7 text-white shadow-[0_30px_90px_rgba(15,23,42,0.22)] sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.32em] text-orange-300">Live Status</p>
-                <h2 className="mt-3 text-2xl font-bold">Queue Overview</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.32em] text-orange-300">即時狀態</p>
+                <h2 className="mt-3 text-2xl font-bold">任務總覽</h2>
               </div>
               <span className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] ${statusTone.badge}`}>
-                {job ? job.status : "idle"}
+                {job ? getStatusLabel(job.status) : "閒置"}
               </span>
             </div>
 
             <div className="mt-8 space-y-4">
               <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5">
                 <div className="flex items-center justify-between text-sm text-slate-300">
-                  <span>Current target</span>
-                  <span>{job?.scan_type === "api" ? "API" : "Website"}</span>
+                  <span>目前目標</span>
+                  <span>{job?.scan_type === "api" ? "API" : "網站"}</span>
                 </div>
                 <p className="mt-3 break-all text-lg font-semibold text-white">
-                  {job?.target_url ?? "No target queued yet"}
+                  {job?.target_url ?? "目前尚未排入目標"}
                 </p>
                 <p className="mt-2 text-sm text-slate-400">
-                  {job ? `${job.project_name} is being tracked in the current session.` : "Submit a target to start asynchronous probing."}
+                  {job ? `目前正在追蹤 ${job.project_name} 這筆掃描任務。` : "送出網址後，系統就會開始非同步探測。"}
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <StatusMetric label="Issues" value={job?.result_summary?.issue_count ?? 0} tone="neutral" />
-                <StatusMetric label="Critical" value={job?.result_summary?.critical_count ?? 0} tone="critical" />
-                <StatusMetric label="High" value={job?.result_summary?.high_count ?? 0} tone="high" />
-                <StatusMetric label="Medium" value={job?.result_summary?.medium_count ?? 0} tone="medium" />
+                <StatusMetric label="問題數" value={job?.result_summary?.issue_count ?? 0} tone="neutral" />
+                <StatusMetric label="嚴重" value={job?.result_summary?.critical_count ?? 0} tone="critical" />
+                <StatusMetric label="高風險" value={job?.result_summary?.high_count ?? 0} tone="high" />
+                <StatusMetric label="中風險" value={job?.result_summary?.medium_count ?? 0} tone="medium" />
               </div>
             </div>
           </section>
@@ -180,50 +224,50 @@ export default function HomePage() {
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-orange-300">Queue Scan</p>
-                <h2 className="mt-3 text-3xl font-black tracking-tight">Dispatch a new assessment</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-orange-300">建立任務</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight">送出新的掃描任務</h2>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-right">
-                <p className="text-[10px] uppercase tracking-[0.32em] text-slate-400">Execution</p>
-                <p className="mt-1 text-sm font-semibold text-white">Async Worker</p>
+                <p className="text-[10px] uppercase tracking-[0.32em] text-slate-400">執行方式</p>
+                <p className="mt-1 text-sm font-semibold text-white">非同步 Worker</p>
               </div>
             </div>
 
             <div className="mt-8 space-y-5">
-              <Field label="JWT access token" hint="Use the access token returned by /api/auth/token/.">
+              <Field label="JWT 存取權杖" hint="登入後會自動帶入，也可手動覆蓋。">
                 <textarea
                   value={token}
                   onChange={(event) => setToken(event.target.value)}
                   className="min-h-28 w-full rounded-[1.35rem] border border-white/10 bg-white/6 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70 focus:bg-white/10"
-                  placeholder="Paste your bearer token here"
+                  placeholder="請貼上 Bearer Token"
                   required
                 />
               </Field>
 
               <div className="grid gap-5 md:grid-cols-2">
-                <Field label="Project name" hint="Internal label for this client or system.">
+                <Field label="專案名稱" hint="用來標記客戶、網站或系統。">
                   <input
                     value={projectName}
                     onChange={(event) => setProjectName(event.target.value)}
                     className="w-full rounded-[1.35rem] border border-white/10 bg-white/6 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70 focus:bg-white/10"
-                    placeholder="Customer portal"
+                    placeholder="例如：客戶主站"
                     required
                   />
                 </Field>
 
-                <Field label="Scan type" hint="Choose baseline web or API probes.">
+                <Field label="掃描類型" hint="選擇網站或 API 探測模式。">
                   <select
                     value={scanType}
                     onChange={(event) => setScanType(event.target.value as "web" | "api")}
                     className="w-full rounded-[1.35rem] border border-white/10 bg-white/6 px-4 py-3 text-sm text-white outline-none transition focus:border-orange-300/70 focus:bg-white/10"
                   >
-                    <option value="web">Web scan</option>
-                    <option value="api">API scan</option>
+                    <option value="web">網站掃描</option>
+                    <option value="api">API 掃描</option>
                   </select>
                 </Field>
               </div>
 
-              <Field label="Target URL" hint="The worker will probe this host directly from the backend.">
+              <Field label="目標網址" hint="後端 worker 會直接對這個網址進行探測。">
                 <input
                   type="url"
                   value={targetUrl}
@@ -241,9 +285,9 @@ export default function HomePage() {
                 disabled={submitting}
                 className="inline-flex min-w-40 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f97316_0%,#dc2626_100%)] px-6 py-3.5 text-sm font-bold text-white shadow-[0_12px_34px_rgba(249,115,22,0.32)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting ? "Queueing..." : "Launch Scan"}
+                {submitting ? "建立中..." : "開始掃描"}
               </button>
-              <p className="text-sm text-slate-400">Each request consumes one credit and returns a job id immediately.</p>
+              <p className="text-sm text-slate-400">每次送出會扣 1 點 credit，API 會立即回傳 job id。</p>
             </div>
 
             {error ? (
@@ -256,8 +300,8 @@ export default function HomePage() {
           <section className="rounded-[2rem] border border-white/50 bg-[rgba(255,255,255,0.74)] p-7 shadow-[0_30px_90px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Investigation Panel</p>
-                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Result timeline</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">結果面板</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">掃描狀態與結果</h2>
               </div>
               {job?.report_file ? (
                 <a
@@ -266,18 +310,17 @@ export default function HomePage() {
                   rel="noreferrer"
                   className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm"
                 >
-                  Download PDF
+                  下載 PDF 報告
                 </a>
               ) : null}
             </div>
 
             {!job ? (
               <div className="mt-8 rounded-[1.75rem] border border-dashed border-slate-300 bg-slate-50/70 p-8">
-                <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-500">Queue Empty</p>
-                <h3 className="mt-4 text-2xl font-bold text-slate-900">No scan submitted yet</h3>
+                <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-500">尚無任務</p>
+                <h3 className="mt-4 text-2xl font-bold text-slate-900">目前還沒有送出掃描</h3>
                 <p className="mt-3 max-w-xl text-sm leading-7 text-slate-600">
-                  Start with a website or API base URL. Once the job is queued, this panel will show its status, severity
-                  counts, and report access.
+                  先輸入網站或 API 網址。任務建立後，這裡會顯示狀態、風險數量與報告下載入口。
                 </p>
               </div>
             ) : (
@@ -285,41 +328,43 @@ export default function HomePage() {
                 <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">{job.scan_type} scan</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">
+                        {job.scan_type === "api" ? "API 掃描" : "網站掃描"}
+                      </p>
                       <h3 className="mt-2 text-2xl font-bold text-slate-950">{job.project_name}</h3>
                     </div>
                     <span className={`rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.24em] ${statusTone.badge}`}>
-                      {job.status}
+                      {getStatusLabel(job.status)}
                     </span>
                   </div>
                   <p className="mt-4 break-all rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{job.target_url}</p>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <ResultCard label="Total Issues" value={job.result_summary?.issue_count ?? 0} accent="text-slate-950" />
-                  <ResultCard label="Critical" value={job.result_summary?.critical_count ?? 0} accent="text-rose-700" />
-                  <ResultCard label="High" value={job.result_summary?.high_count ?? 0} accent="text-red-700" />
-                  <ResultCard label="Medium" value={job.result_summary?.medium_count ?? 0} accent="text-amber-700" />
+                  <ResultCard label="總問題數" value={job.result_summary?.issue_count ?? 0} accent="text-slate-950" />
+                  <ResultCard label="嚴重" value={job.result_summary?.critical_count ?? 0} accent="text-rose-700" />
+                  <ResultCard label="高風險" value={job.result_summary?.high_count ?? 0} accent="text-red-700" />
+                  <ResultCard label="中風險" value={job.result_summary?.medium_count ?? 0} accent="text-amber-700" />
                 </div>
 
                 <div className="rounded-[1.5rem] bg-slate-950 p-5 text-white">
-                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-orange-300">Execution Flow</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-orange-300">執行流程</p>
                   <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                    <TimelineStep title="Queued" active>
-                      API accepts the request and returns the task metadata immediately.
+                    <TimelineStep title="已排入" active>
+                      API 接收請求後，會立即建立任務並回傳基本資訊。
                     </TimelineStep>
-                    <TimelineStep title="Running" active={job.status === "running" || job.status === "completed" || job.status === "failed"}>
-                      Worker probes the target URL and aggregates baseline risk signals.
+                    <TimelineStep title="掃描中" active={job.status === "running" || job.status === "completed" || job.status === "failed"}>
+                      Worker 會在背景對目標網址執行探測並彙整風險訊號。
                     </TimelineStep>
-                    <TimelineStep title="Report" active={job.status === "completed"}>
-                      Findings are stored and the PDF report becomes downloadable.
+                    <TimelineStep title="報告完成" active={job.status === "completed"}>
+                      結果寫入資料庫後，就可以直接下載 PDF 報告。
                     </TimelineStep>
                   </div>
                 </div>
 
                 {job.error_message ? (
                   <div className="rounded-[1.5rem] border border-red-200 bg-red-50 p-5 text-sm text-red-800">
-                    <p className="font-semibold">Task failed</p>
+                    <p className="font-semibold">任務失敗</p>
                     <p className="mt-2">{job.error_message}</p>
                   </div>
                 ) : null}
@@ -416,24 +461,27 @@ function TimelineStep({
 function getStatusTone(status?: ScanJob["status"]) {
   switch (status) {
     case "running":
-      return {
-        badge: "bg-amber-200 text-amber-900",
-      };
+      return { badge: "bg-amber-200 text-amber-900" };
     case "completed":
-      return {
-        badge: "bg-emerald-200 text-emerald-900",
-      };
+      return { badge: "bg-emerald-200 text-emerald-900" };
     case "failed":
-      return {
-        badge: "bg-rose-200 text-rose-900",
-      };
+      return { badge: "bg-rose-200 text-rose-900" };
     case "pending":
-      return {
-        badge: "bg-slate-200 text-slate-900",
-      };
+      return { badge: "bg-slate-200 text-slate-900" };
     default:
-      return {
-        badge: "bg-slate-200 text-slate-900",
-      };
+      return { badge: "bg-slate-200 text-slate-900" };
+  }
+}
+
+function getStatusLabel(status: ScanJob["status"]) {
+  switch (status) {
+    case "pending":
+      return "等待中";
+    case "running":
+      return "掃描中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失敗";
   }
 }

@@ -159,6 +159,7 @@ Required env:
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=https://your-backend-domain/api
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-oauth-client-id
 ```
 
 Important notes:
@@ -179,7 +180,51 @@ Then use:
 DJANGO_ALLOWED_HOSTS=web-scan-web.zeabur.app
 CORS_ALLOWED_ORIGINS=https://web-scan-front.zeabur.app
 NEXT_PUBLIC_API_BASE_URL=https://web-scan-web.zeabur.app/api
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=<your-google-client-id>
 ```
+
+Backend auth env:
+
+```env
+GOOGLE_OAUTH_CLIENT_ID=<same-google-client-id>
+```
+
+## Authentication
+
+Available endpoints:
+
+- `POST /api/auth/register/`
+- `POST /api/auth/token/`
+- `POST /api/auth/token/refresh/`
+- `POST /api/auth/google/`
+- `GET /api/auth/me/`
+
+Frontend pages:
+
+- `/login`
+- `/register`
+
+## Google OAuth Setup
+
+You need to create the Google OAuth client yourself in Google Cloud Console.
+
+Recommended type:
+
+- OAuth Client Type: `Web application`
+
+Authorized JavaScript origins:
+
+- `https://web-scan-front.zeabur.app`
+- `http://localhost:3000`
+
+Authorized redirect URIs:
+
+- not required for the current Google Identity Services button flow
+
+Use the generated client id in both:
+
+- `GOOGLE_OAUTH_CLIENT_ID` on backend
+- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` on frontend
 
 ## Credits
 
