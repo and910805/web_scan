@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
 import { AuthUser, clearAuth, getStoredAccessToken, getStoredUser } from "@/lib/auth";
@@ -40,7 +41,7 @@ const capabilityCards = [
 ];
 
 export default function HomePage() {
-  const [token, setToken] = useState("");
+  const router = useRouter();
   const [manualToken, setManualToken] = useState("");
   const [projectName, setProjectName] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
@@ -53,19 +54,19 @@ export default function HomePage() {
 
   useEffect(() => {
     const storedToken = getStoredAccessToken();
-    setToken(storedToken);
     setManualToken(storedToken);
     setUser(getStoredUser());
   }, []);
 
   useEffect(() => {
-    if (!job || !token || !["pending", "running"].includes(job.status)) {
+    const activeToken = getActiveToken(manualToken);
+    if (!job || !activeToken || !["pending", "running"].includes(job.status)) {
       return;
     }
 
     const timer = window.setInterval(async () => {
       const response = await fetch(`${API_BASE_URL}/scans/${job.id}/`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${activeToken}` },
       });
       if (!response.ok) {
         return;
@@ -75,12 +76,12 @@ export default function HomePage() {
     }, 4000);
 
     return () => window.clearInterval(timer);
-  }, [job, token]);
+  }, [job, manualToken]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const activeToken = manualToken.trim() || token;
+    const activeToken = getActiveToken(manualToken);
     if (!activeToken) {
       setError("請先登入，或在進階設定中手動填入 JWT 後再建立掃描任務。");
       return;
@@ -118,9 +119,10 @@ export default function HomePage() {
   }
 
   async function handleDownloadReport() {
-    const activeToken = manualToken.trim() || token;
+    const activeToken = getActiveToken(manualToken);
     if (!job?.id || !activeToken) {
       setError("請先登入後再下載 PDF 報告。");
+      router.push("/login");
       return;
     }
 
@@ -134,9 +136,15 @@ export default function HomePage() {
         },
       });
 
+      if (response.status === 401) {
+        clearAuth();
+        setUser(null);
+        setManualToken("");
+        throw new Error("登入已失效，請重新登入後再下載報告。");
+      }
+
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`PDF 下載失敗。HTTP ${response.status}${text ? `: ${text.slice(0, 120)}` : ""}`);
+        throw new Error(`PDF 下載失敗。HTTP ${response.status}`);
       }
 
       const blob = await response.blob();
@@ -156,7 +164,7 @@ export default function HomePage() {
   }
 
   const statusTone = getStatusTone(job?.status);
-  const canSubmit = Boolean(manualToken.trim() || token);
+  const canSubmit = Boolean(getActiveToken(manualToken));
 
   return (
     <main className="relative overflow-hidden px-4 py-6 sm:px-6 lg:px-10">
@@ -180,9 +188,9 @@ export default function HomePage() {
                   type="button"
                   onClick={() => {
                     clearAuth();
-                    setToken("");
                     setManualToken("");
                     setUser(null);
+                    setJob(null);
                   }}
                   className="rounded-full border border-slate-300 px-4 py-2 font-semibold text-slate-900"
                 >
@@ -563,4 +571,8 @@ function deriveProjectName(targetUrl: string) {
   } catch {
     return "未命名掃描";
   }
+}
+
+function getActiveToken(manualToken: string) {
+  return manualToken.trim() || getStoredAccessToken();
 }
