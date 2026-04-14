@@ -8,6 +8,7 @@ class ScanJobAdmin(admin.ModelAdmin):
     list_display = ("id", "project_name", "scan_type", "user", "status", "created_at", "finished_at")
     list_filter = ("scan_type", "status", "created_at")
     search_fields = ("project_name", "target_url", "user__username")
+    readonly_fields = ("auth_headers", "auth_cookies", "failure_code", "failure_context")
 
 
 @admin.register(IgnoreRule)

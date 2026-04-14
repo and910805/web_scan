@@ -6,13 +6,30 @@ from .models import IgnoreRule, NotificationHook, ScanJob, ScheduledScan
 class ScanJobCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ScanJob
-        fields = ("id", "project_name", "scan_type", "target_url")
+        fields = ("id", "project_name", "scan_type", "target_url", "auth_headers", "auth_cookies")
         read_only_fields = ("id",)
 
     def validate_target_url(self, value: str) -> str:
         if not value.startswith(("http://", "https://")):
             raise serializers.ValidationError("Only http and https URLs are allowed.")
         return value
+
+    def validate_auth_headers(self, value: dict) -> dict:
+        return self._validate_string_map(value, "auth_headers")
+
+    def validate_auth_cookies(self, value: dict) -> dict:
+        return self._validate_string_map(value, "auth_cookies")
+
+    def _validate_string_map(self, value: dict, field_name: str) -> dict:
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(f"{field_name} must be a JSON object.")
+
+        cleaned = {}
+        for key, item_value in value.items():
+            if not isinstance(key, str) or not isinstance(item_value, str):
+                raise serializers.ValidationError(f"{field_name} keys and values must be strings.")
+            cleaned[key.strip()] = item_value.strip()
+        return {key: item_value for key, item_value in cleaned.items() if key}
 
 
 class ScanJobSerializer(serializers.ModelSerializer):
@@ -25,10 +42,14 @@ class ScanJobSerializer(serializers.ModelSerializer):
             "project_name",
             "scan_type",
             "target_url",
+            "auth_headers",
+            "auth_cookies",
             "status",
             "result_summary",
             "findings",
             "error_message",
+            "failure_code",
+            "failure_context",
             "report_file",
             "started_at",
             "finished_at",

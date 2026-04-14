@@ -39,6 +39,8 @@ class ScanJobViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.Retr
             project_name=validated_data["project_name"],
             scan_type=validated_data["scan_type"],
             target_url=validated_data["target_url"],
+            auth_headers=validated_data.get("auth_headers", {}),
+            auth_cookies=validated_data.get("auth_cookies", {}),
         )
         scan_project.delay(scan_job.id)
         output = ScanJobSerializer(scan_job, context=self.get_serializer_context())

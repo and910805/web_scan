@@ -7,6 +7,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 env = environ.Env(
     DJANGO_DEBUG=(bool, False),
     DEFAULT_USER_CREDITS=(int, 1),
+    ZAP_ENABLED=(bool, False),
 )
 environ.Env.read_env(BASE_DIR.parent / ".env")
 
@@ -126,3 +127,14 @@ ECPAY_CHECKOUT_ACTION_URL = env("ECPAY_CHECKOUT_ACTION_URL", default="")
 ECPAY_RETURN_URL = env("ECPAY_RETURN_URL", default="")
 ECPAY_CLIENT_BACK_URL = env("ECPAY_CLIENT_BACK_URL", default="")
 GOOGLE_OAUTH_CLIENT_ID = env("GOOGLE_OAUTH_CLIENT_ID", default="")
+ZAP_ENABLED = env("ZAP_ENABLED", default=False)
+ZAP_API_URL = env("ZAP_API_URL", default="")
+ZAP_API_KEY = env("ZAP_API_KEY", default="")
+
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"

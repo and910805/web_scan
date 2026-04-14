@@ -8,9 +8,11 @@ from .scanner import (
     _analyze_api_schema,
     _analyze_robots,
     _analyze_sitemap,
+    _discover_surface_from_homepage,
     _calculate_risk_score,
     _deduplicate_issues,
     _format_probe_evidence,
+    _inspect_javascript_assets,
     _inspect_cookie_security,
     _build_issue,
 )
@@ -155,7 +157,51 @@ class ScannerHelperTests(SimpleTestCase):
         self.assertEqual(result["path_count"], 3)
         self.assertEqual(result["public_endpoint_count"], 2)
         self.assertEqual(result["sensitive_endpoint_count"], 2)
+        self.assertEqual(result["unauthenticated_sensitive_count"], 1)
         self.assertIn("GET /health", result["public_examples"])
+        self.assertIn("POST /auth/login", result["unauthenticated_sensitive_examples"])
+
+    def test_discover_surface_from_homepage_extracts_same_origin_paths(self):
+        homepage = {
+            "headers": {"Content-Type": "text/html"},
+            "header_values": {"content-type": ["text/html"]},
+            "body_preview": (
+                '<a href="/dashboard">Dashboard</a>'
+                '<a href="https://example.com/admin">Admin</a>'
+                '<a href="https://external.example.org/x">Ignore</a>'
+                '<script src="/_next/static/app.js"></script>'
+                '<form action="/auth/login"></form>'
+            ),
+        }
+
+        result = _discover_surface_from_homepage("https://example.com", homepage)
+
+        self.assertIn("/dashboard", result["candidate_paths"])
+        self.assertIn("/admin", result["candidate_paths"])
+        self.assertIn("/auth/login", result["candidate_paths"])
+        self.assertEqual(result["script_urls"], ["https://example.com/_next/static/app.js"])
+
+    def test_javascript_asset_inspection_detects_secrets_and_endpoints(self):
+        original_request = _inspect_javascript_assets.__globals__["_request"]
+
+        def fake_request(url, headers, method="GET", follow_redirects=True, read_limit=4096):
+            return {
+                "status_code": 200,
+                "headers": {"Content-Type": "application/javascript"},
+                "header_values": {"content-type": ["application/javascript"]},
+                "body_preview": 'const key="AIzaSyA123456789012345678901234567890123"; const route="/api/admin/users";',
+                "final_url": url,
+            }
+
+        _inspect_javascript_assets.__globals__["_request"] = fake_request
+        try:
+            result = _inspect_javascript_assets(["https://example.com/static/app.js"], {"User-Agent": "WeakScanBot/2.0"})
+        finally:
+            _inspect_javascript_assets.__globals__["_request"] = original_request
+
+        self.assertEqual(len(result), 1)
+        self.assertIn("Google API key pattern", result[0]["secret_matches"])
+        self.assertIn("/api/admin/users", result[0]["discovered_endpoints"])
 
     def test_history_comparison_marks_new_persistent_and_resolved(self):
         findings = {

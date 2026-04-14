@@ -52,7 +52,7 @@ class GoogleLoginView(APIView):
 
     def post(self, request, *args, **kwargs):
         if not settings.GOOGLE_OAUTH_CLIENT_ID:
-            return Response({"detail": "Google OAuth 尚未設定。"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            return Response({"detail": "Google OAuth Client ID 尚未設定。"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         serializer = GoogleLoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -67,7 +67,7 @@ class GoogleLoginView(APIView):
             return Response({"detail": "Google 登入驗證失敗。"}, status=status.HTTP_400_BAD_REQUEST)
 
         if token_info.get("email_verified") is not True:
-            return Response({"detail": "Google 帳號 Email 尚未驗證。"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Google 帳號的 Email 尚未驗證。"}, status=status.HTTP_400_BAD_REQUEST)
 
         email = token_info["email"].lower().strip()
         sub = token_info["sub"]
@@ -89,15 +89,18 @@ class GoogleLoginView(APIView):
                 google_sub=sub,
             )
         else:
-            updated = False
+            updated_fields = []
             if not user.google_sub:
                 user.google_sub = sub
-                updated = True
+                updated_fields.append("google_sub")
             if user.auth_provider != User.AuthProvider.GOOGLE:
                 user.auth_provider = User.AuthProvider.GOOGLE
-                updated = True
-            if updated:
-                user.save(update_fields=["google_sub", "auth_provider"])
+                updated_fields.append("auth_provider")
+            if user.email != email:
+                user.email = email
+                updated_fields.append("email")
+            if updated_fields:
+                user.save(update_fields=updated_fields)
 
         return Response(
             {

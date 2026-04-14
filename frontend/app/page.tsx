@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
-import { AuthUser, clearAuth, getStoredAccessToken, getStoredUser, refreshAccessToken } from "@/lib/auth";
+import {
+  AuthUser,
+  clearAuth,
+  getStoredAccessToken,
+  getStoredUser,
+  refreshAccessToken,
+  syncStoredUserProfile,
+} from "@/lib/auth";
 
 type ScanJob = {
   id: number;
@@ -24,6 +31,8 @@ type ScanJob = {
     resolved_count?: number;
   };
   error_message: string;
+  failure_code?: string;
+  failure_context?: Record<string, unknown>;
   report_file: string | null;
 };
 
@@ -62,10 +71,11 @@ const capabilityCards = [
 
 export default function HomePage() {
   const router = useRouter();
-  const [manualToken, setManualToken] = useState("");
   const [projectName, setProjectName] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
   const [scanType, setScanType] = useState<"web" | "api">("web");
+  const [authHeadersJson, setAuthHeadersJson] = useState("");
+  const [authCookiesJson, setAuthCookiesJson] = useState("");
   const [job, setJob] = useState<ScanJob | null>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -74,8 +84,14 @@ export default function HomePage() {
   const [trends, setTrends] = useState<TrendSnapshot | null>(null);
 
   useEffect(() => {
-    syncAuthState(setManualToken, setUser);
-    const sync = () => syncAuthState(setManualToken, setUser);
+    const sync = () => {
+      setUser(getStoredUser());
+      void syncStoredUserProfile(API_BASE_URL).then((nextUser) => {
+        setUser(nextUser ?? getStoredUser());
+      });
+    };
+
+    sync();
     window.addEventListener("focus", sync);
     window.addEventListener("storage", sync);
     document.addEventListener("visibilitychange", sync);
@@ -88,7 +104,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const activeToken = getActiveToken(manualToken);
+    const activeToken = getActiveToken();
     if (!job || !activeToken || !["pending", "running"].includes(job.status)) {
       return;
     }
@@ -97,7 +113,7 @@ export default function HomePage() {
       const response = await fetchWithStoredAuth(`${API_BASE_URL}/scans/${job.id}/`);
       if (!response.ok) {
         if (response.status === 401) {
-          syncAuthState(setManualToken, setUser);
+          setUser(getStoredUser());
         }
         return;
       }
@@ -107,23 +123,21 @@ export default function HomePage() {
     }, 4000);
 
     return () => window.clearInterval(timer);
-  }, [job, manualToken]);
+  }, [job]);
 
   useEffect(() => {
-    const activeToken = getActiveToken(manualToken);
-    if (!activeToken) {
+    if (!getActiveToken()) {
       setTrends(null);
       return;
     }
 
     void fetchTrends().then(setTrends).catch(() => undefined);
-  }, [manualToken, job?.status]);
+  }, [job?.status]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const activeToken = getActiveToken(manualToken);
-    if (!activeToken) {
+    if (!getActiveToken()) {
       setError("請先登入再開始掃描。");
       return;
     }
@@ -133,6 +147,8 @@ export default function HomePage() {
 
     try {
       const resolvedProjectName = projectName.trim() || deriveProjectName(targetUrl);
+      const authHeaders = parseOptionalJsonObject(authHeadersJson, "認證標頭");
+      const authCookies = parseOptionalJsonObject(authCookiesJson, "Cookie");
       const response = await fetchWithStoredAuth(`${API_BASE_URL}/scans/`, {
         method: "POST",
         headers: {
@@ -142,6 +158,8 @@ export default function HomePage() {
           project_name: resolvedProjectName,
           scan_type: scanType,
           target_url: targetUrl,
+          auth_headers: authHeaders,
+          auth_cookies: authCookies,
         }),
       });
 
@@ -151,7 +169,8 @@ export default function HomePage() {
       }
 
       setJob(payload as ScanJob);
-      syncAuthState(setManualToken, setUser);
+      const nextUser = await syncStoredUserProfile(API_BASE_URL);
+      setUser(nextUser ?? getStoredUser());
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "送出掃描任務失敗。");
     } finally {
@@ -160,8 +179,7 @@ export default function HomePage() {
   }
 
   async function handleDownloadReport() {
-    const activeToken = getActiveToken(manualToken);
-    if (!job?.id || !activeToken) {
+    if (!job?.id || !getActiveToken()) {
       setError("請先登入再下載 PDF 報告。");
       router.push("/login");
       return;
@@ -178,7 +196,6 @@ export default function HomePage() {
       if (response.status === 401) {
         clearAuth();
         setUser(null);
-        setManualToken("");
         throw new Error("登入狀態已過期，請重新登入。");
       }
 
@@ -218,8 +235,7 @@ export default function HomePage() {
   }
 
   const statusTone = getStatusTone(job?.status);
-  const activeToken = typeof window === "undefined" ? manualToken.trim() : getActiveToken(manualToken);
-  const canSubmit = Boolean(activeToken) && !submitting;
+  const canSubmit = Boolean(getActiveToken()) && !submitting;
 
   return (
     <main className="relative overflow-hidden px-4 py-6 sm:px-6 lg:px-10">
@@ -243,7 +259,6 @@ export default function HomePage() {
                   type="button"
                   onClick={() => {
                     clearAuth();
-                    setManualToken("");
                     setUser(null);
                     setJob(null);
                   }}
@@ -397,30 +412,13 @@ export default function HomePage() {
             <div className="mt-8 space-y-5">
               {user ? (
                 <div className="rounded-[1.35rem] border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-100">
-                  目前登入帳號為 <span className="font-semibold">{user.username}</span>。在登入有效期間內，可直接持續送出掃描任務。
+                  目前登入帳號為 <span className="font-semibold">{user.username}</span>。額度會自動與後端同步，不需要手動貼上 JWT。
                 </div>
               ) : (
                 <div className="rounded-[1.35rem] border border-amber-300/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-100">
                   請先 <Link href="/login" className="font-semibold text-amber-200 underline">登入</Link>，再送出掃描任務。
                 </div>
               )}
-
-              <details className="rounded-[1.35rem] border border-white/10 bg-white/5 px-4 py-4">
-                <summary className="cursor-pointer list-none text-sm font-semibold text-white">進階設定：手動覆寫 Token</summary>
-                <p className="mt-3 text-sm text-slate-400">
-                  系統平常會自動使用已儲存的 access token。只有在你想手動貼上 JWT 測試時，才需要使用這個欄位。
-                </p>
-                <div className="mt-4">
-                  <Field label="JWT 權杖" hint="非必填">
-                    <textarea
-                      value={manualToken}
-                      onChange={(event) => setManualToken(event.target.value)}
-                      className="dark-field min-h-28 w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70"
-                      placeholder="只有在要覆寫目前登入狀態時，才需要手動貼上 Bearer token。"
-                    />
-                  </Field>
-                </div>
-              </details>
 
               <div className="grid gap-5 md:grid-cols-2">
                 <Field label="專案名稱" hint="非必填">
@@ -443,6 +441,35 @@ export default function HomePage() {
                   </select>
                 </Field>
               </div>
+
+              <details className="rounded-[1.35rem] border border-white/10 bg-white/5 px-4 py-4">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-white">進階設定：登入態掃描</summary>
+                <p className="mt-3 text-sm text-slate-400">
+                  如果目標需要登入，你可以提供額外的 HTTP 標頭或 Cookie。格式必須是 JSON 物件，例如
+                  <span className="mx-1 font-mono text-slate-300">{'{"Authorization":"Bearer ..."}'}</span>
+                  或
+                  <span className="mx-1 font-mono text-slate-300">{'{"sessionid":"abc123"}'}</span>。
+                </p>
+                <div className="mt-4 grid gap-5 md:grid-cols-2">
+                  <Field label="認證標頭" hint="JSON 物件">
+                    <textarea
+                      value={authHeadersJson}
+                      onChange={(event) => setAuthHeadersJson(event.target.value)}
+                      className="dark-field min-h-28 w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70"
+                      placeholder='{"Authorization":"Bearer ..."}'
+                    />
+                  </Field>
+
+                  <Field label="Cookie" hint="JSON 物件">
+                    <textarea
+                      value={authCookiesJson}
+                      onChange={(event) => setAuthCookiesJson(event.target.value)}
+                      className="dark-field min-h-28 w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70"
+                      placeholder='{"sessionid":"abc123"}'
+                    />
+                  </Field>
+                </div>
+              </details>
 
               <Field label="目標網址" hint="必填">
                 <input
@@ -549,6 +576,9 @@ export default function HomePage() {
                   <div className="rounded-[1.5rem] border border-red-200 bg-red-50 p-5 text-sm text-red-800">
                     <p className="font-semibold">任務錯誤</p>
                     <p className="mt-2">{job.error_message}</p>
+                    {job.failure_code ? (
+                      <p className="mt-2 text-xs uppercase tracking-[0.2em] text-red-600">錯誤分類：{job.failure_code}</p>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -677,16 +707,35 @@ function deriveProjectName(targetUrl: string) {
   }
 }
 
-function getActiveToken(manualToken: string) {
-  return manualToken.trim() || getStoredAccessToken();
+function parseOptionalJsonObject(value: string, label: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return {};
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error(`${label} 格式錯誤，請輸入有效的 JSON 物件。`);
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label} 必須是 JSON 物件。`);
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, itemValue] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof itemValue !== "string") {
+      throw new Error(`${label} 的值必須都是字串。`);
+    }
+    result[key] = itemValue;
+  }
+  return result;
 }
 
-function syncAuthState(
-  setManualToken: (value: string) => void,
-  setUser: (value: AuthUser | null) => void,
-) {
-  setManualToken(getStoredAccessToken());
-  setUser(getStoredUser());
+function getActiveToken() {
+  return getStoredAccessToken();
 }
 
 async function fetchWithStoredAuth(

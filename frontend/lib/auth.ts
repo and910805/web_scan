@@ -19,6 +19,13 @@ export function storeAuth(tokens: { access: string; refresh: string }, user: Aut
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
+export function updateStoredUser(user: AuthUser) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
 export function clearAuth() {
   if (typeof window === "undefined") {
     return;
@@ -63,6 +70,36 @@ export function getStoredUser(): AuthUser | null {
   } catch {
     return null;
   }
+}
+
+export async function syncStoredUserProfile(apiBaseUrl: string) {
+  let access = getStoredAccessToken();
+  if (!access) {
+    access = await refreshAccessToken(apiBaseUrl);
+  }
+  if (!access) {
+    return null;
+  }
+
+  const response = await fetch(`${apiBaseUrl}/auth/me/`, {
+    headers: { Authorization: `Bearer ${access}` },
+  });
+
+  if (response.status === 401) {
+    access = await refreshAccessToken(apiBaseUrl);
+    if (!access) {
+      return null;
+    }
+    return syncStoredUserProfile(apiBaseUrl);
+  }
+
+  if (!response.ok) {
+    return getStoredUser();
+  }
+
+  const user = (await response.json()) as AuthUser;
+  updateStoredUser(user);
+  return user;
 }
 
 export async function refreshAccessToken(apiBaseUrl: string) {

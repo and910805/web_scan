@@ -9,6 +9,10 @@ from urllib import error, parse, request
 
 DEFAULT_TIMEOUT = 12
 DEFAULT_USER_AGENT = "WeakScanBot/2.0"
+MAX_HTML_PREVIEW = 65536
+MAX_JS_PREVIEW = 65536
+MAX_SCRIPT_ASSETS = 6
+MAX_DISCOVERED_PATHS = 10
 COMMON_API_PATHS = (
     "/api",
     "/api/v1",
@@ -70,6 +74,13 @@ ERROR_DISCLOSURE_PATTERNS = (
     "typeerror",
     "fatal error",
 )
+SECRET_PATTERNS = (
+    ("Google API key pattern", re.compile(r"AIza[0-9A-Za-z\\-_]{35}")),
+    ("Stripe live key pattern", re.compile(r"sk_live_[0-9A-Za-z]{16,}")),
+    ("Supabase service key pattern", re.compile(r"eyJ[a-zA-Z0-9_\\-]{20,}\\.[a-zA-Z0-9_\\-]{20,}\\.[a-zA-Z0-9_\\-]{10,}")),
+)
+ENDPOINT_PATTERN = re.compile(r'["\\\']((?:/|https?://)[^"\\\']*(?:api|graphql|auth|admin|internal)[^"\\\']*)["\\\']', re.IGNORECASE)
+HTML_LINK_PATTERN = re.compile(r"""(?:href|src|action)=["']([^"'#]+)["']""", re.IGNORECASE)
 SEVERITY_WEIGHTS = {
     "critical": 40,
     "high": 20,
@@ -99,15 +110,20 @@ class _NoRedirectHandler(request.HTTPRedirectHandler):
         return None
 
 
-def run_target_scan(scan_type: str, target_url: str) -> dict:
+def run_target_scan(
+    scan_type: str,
+    target_url: str,
+    auth_headers: dict[str, str] | None = None,
+    auth_cookies: dict[str, str] | None = None,
+) -> dict:
     parsed = parse.urlparse(target_url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http and https URLs are supported.")
 
     normalized_url = parsed.geturl()
-    base_headers = {"User-Agent": DEFAULT_USER_AGENT}
+    base_headers = _build_request_headers(auth_headers, auth_cookies)
 
-    homepage = _request(normalized_url, headers=base_headers)
+    homepage = _request(normalized_url, headers=base_headers, read_limit=MAX_HTML_PREVIEW)
     tls_details = _inspect_tls(parsed)
     security_headers = _inspect_security_headers(homepage)
     sensitive_paths = [_probe_path(normalized_url, path, base_headers) for path in SENSITIVE_PATHS]
@@ -115,6 +131,12 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
     api_paths = [_probe_path(normalized_url, path, base_headers, method="OPTIONS") for path in COMMON_API_PATHS]
     api_schema_analysis = _analyze_api_schema(normalized_url, base_headers)
     common_files = [_probe_path(normalized_url, path, base_headers) for path in COMMON_DISCOVERY_PATHS]
+    surface_discovery = _discover_surface_from_homepage(normalized_url, homepage)
+    discovered_path_checks = [
+        _probe_path(normalized_url, path, base_headers)
+        for path in surface_discovery["candidate_paths"][:MAX_DISCOVERED_PATHS]
+    ]
+    javascript_assets = _inspect_javascript_assets(surface_discovery["script_urls"], base_headers)
     cookie_assessment = _inspect_cookie_security(homepage)
     http_methods = _inspect_http_methods(normalized_url, base_headers)
     https_redirect = _check_https_redirect(parsed, base_headers)
@@ -231,6 +253,19 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
                 )
             )
 
+    for item in discovered_path_checks:
+        if item["status_code"] == 200 and _contains_sensitive_hint(item["path"]):
+            issues.append(
+                _build_issue(
+                    category="surface_discovery",
+                    severity="medium",
+                    title=f"Discovered sensitive-looking route: {item['path']}",
+                    details=f"The homepage referenced {item['path']} and the route responded with HTTP 200.",
+                    evidence=_format_probe_evidence(item),
+                    recommendation="Review whether this route should be publicly linked, authenticated, or hidden from unauthenticated users.",
+                )
+            )
+
     if api_schema_analysis["status"] == "ok":
         if api_schema_analysis["public_endpoint_count"] > 0:
             issues.append(
@@ -265,6 +300,20 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
                     recommendation="Confirm that sensitive API routes are protected and intentionally documented.",
                 )
             )
+        if api_schema_analysis["unauthenticated_sensitive_count"] > 0:
+            issues.append(
+                _build_issue(
+                    category="api_auth",
+                    severity="high",
+                    title="Sensitive API routes appear unauthenticated in schema",
+                    details=(
+                        f"The published schema includes {api_schema_analysis['unauthenticated_sensitive_count']} "
+                        "sensitive-looking operations without explicit security requirements."
+                    ),
+                    evidence=f"Examples: {', '.join(api_schema_analysis['unauthenticated_sensitive_examples']) or 'none'}",
+                    recommendation="Require authentication and authorization on admin, internal, and account-related endpoints.",
+                )
+            )
 
     if cors_check and cors_check["allow_origin"] == "*":
         issues.append(
@@ -275,6 +324,21 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
                 details="Access-Control-Allow-Origin is set to '*'.",
                 evidence=f"Allow-Origin: {cors_check['allow_origin']}",
                 recommendation="Replace the wildcard with an allowlist of trusted front-end origins.",
+            )
+        )
+
+    if cors_check and cors_check["allow_origin"] == "*" and cors_check["allow_credentials"].lower() == "true":
+        issues.append(
+            _build_issue(
+                category="cors",
+                severity="high",
+                title="Wildcard CORS is combined with credentials",
+                details="The target allows any origin and also advertises credentialed cross-origin requests.",
+                evidence=(
+                    f"Allow-Origin: {cors_check['allow_origin']} | "
+                    f"Allow-Credentials: {cors_check['allow_credentials']}"
+                ),
+                recommendation="Do not combine wildcard origins with credentialed requests. Replace '*' with trusted origins only.",
             )
         )
 
@@ -374,6 +438,30 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
             )
         )
 
+    for asset in javascript_assets:
+        if asset["secret_matches"]:
+            issues.append(
+                _build_issue(
+                    category="javascript_asset",
+                    severity="high",
+                    title="JavaScript asset contains secret-like material",
+                    details=f"{asset['url']} contains patterns that resemble embedded credentials or tokens.",
+                    evidence=f"Matched patterns: {', '.join(asset['secret_matches'])}",
+                    recommendation="Remove secrets from client-side bundles and rotate any credentials that were exposed.",
+                )
+            )
+        if asset["discovered_endpoints"]:
+            issues.append(
+                _build_issue(
+                    category="javascript_asset",
+                    severity="low",
+                    title="JavaScript asset discloses internal or API endpoints",
+                    details=f"{asset['url']} references sensitive-looking routes or APIs.",
+                    evidence=f"Examples: {', '.join(asset['discovered_endpoints'][:5])}",
+                    recommendation="Review whether these client-side references unnecessarily expose internal or administrative routes.",
+                )
+            )
+
     for flagged_path in robots_analysis["flagged_paths"]:
         issues.append(
             _build_issue(
@@ -434,6 +522,9 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
         "common_files": common_files,
         "sensitive_paths": sensitive_paths,
         "exposed_surface_paths": exposed_surface_paths,
+        "surface_discovery": surface_discovery,
+        "discovered_path_checks": discovered_path_checks,
+        "javascript_assets": javascript_assets,
         "api_paths": api_paths,
         "api_schema_analysis": api_schema_analysis,
         "cookie_security": cookie_assessment,
@@ -444,17 +535,27 @@ def run_target_scan(scan_type: str, target_url: str) -> dict:
         "sitemap_analysis": sitemap_analysis,
         "deduplication": deduplication,
         "cors": cors_check,
+        "auth_context": {
+            "custom_headers_supplied": bool(auth_headers),
+            "custom_cookies_supplied": bool(auth_cookies),
+        },
         "unauthenticated_paths": unauthenticated_paths,
         "issues": issues,
     }
 
 
-def _request(url: str, headers: dict[str, str], method: str = "GET", follow_redirects: bool = True) -> dict:
+def _request(
+    url: str,
+    headers: dict[str, str],
+    method: str = "GET",
+    follow_redirects: bool = True,
+    read_limit: int = 4096,
+) -> dict:
     req = request.Request(url, headers=headers, method=method)
     opener = request.build_opener() if follow_redirects else request.build_opener(_NoRedirectHandler())
     try:
         with opener.open(req, timeout=DEFAULT_TIMEOUT) as response:
-            body = response.read(4096)
+            body = response.read(read_limit)
             return _build_response(
                 status_code=response.getcode(),
                 headers=response.headers,
@@ -462,7 +563,7 @@ def _request(url: str, headers: dict[str, str], method: str = "GET", follow_redi
                 final_url=response.geturl(),
             )
     except error.HTTPError as exc:
-        body = exc.read(2048) if exc.fp else b""
+        body = exc.read(min(read_limit, 2048)) if exc.fp else b""
         return _build_response(
             status_code=exc.code,
             headers=exc.headers,
@@ -515,7 +616,7 @@ def _probe_path(base_url: str, path: str, headers: dict[str, str], method: str =
 def _fetch_schema_url(base_url: str, path: str, headers: dict[str, str]) -> dict:
     url = parse.urljoin(_ensure_trailing_slash(base_url), path.lstrip("/"))
     try:
-        response = _request(url, headers=headers, method="GET")
+        response = _request(url, headers=headers, method="GET", read_limit=MAX_HTML_PREVIEW)
         return {
             "path": path,
             "url": url,
@@ -535,6 +636,100 @@ def _fetch_schema_url(base_url: str, path: str, headers: dict[str, str]) -> dict
         }
 
 
+def _build_request_headers(
+    auth_headers: dict[str, str] | None,
+    auth_cookies: dict[str, str] | None,
+) -> dict[str, str]:
+    headers = {"User-Agent": DEFAULT_USER_AGENT}
+    for key, value in (auth_headers or {}).items():
+        if key and value:
+            headers[key] = value
+
+    if auth_cookies:
+        cookie_header = "; ".join(f"{key}={value}" for key, value in auth_cookies.items() if key and value)
+        if cookie_header:
+            headers["Cookie"] = cookie_header
+    return headers
+
+
+def _discover_surface_from_homepage(base_url: str, homepage: dict) -> dict:
+    content_type = _header_value(homepage, "Content-Type").lower()
+    if "html" not in content_type:
+        return {"candidate_paths": [], "script_urls": [], "link_urls": [], "form_actions": []}
+
+    body = homepage.get("body_preview", "")
+    script_urls = []
+    link_urls = []
+    form_actions = []
+
+    for raw_value in HTML_LINK_PATTERN.findall(body):
+        normalized = _normalize_same_origin_url(base_url, raw_value)
+        if not normalized:
+            continue
+
+        if raw_value.lower().endswith(".js") or "/_next/static/" in raw_value.lower():
+            script_urls.append(normalized)
+        elif raw_value.lower().startswith("javascript:"):
+            continue
+        else:
+            link_urls.append(normalized)
+
+    for action in re.findall(r"""<form[^>]+action=["']([^"']+)["']""", body, flags=re.IGNORECASE):
+        normalized = _normalize_same_origin_url(base_url, action)
+        if normalized:
+            form_actions.append(normalized)
+
+    candidate_paths = []
+    for url in link_urls + form_actions:
+        parsed = parse.urlparse(url)
+        if parsed.path and parsed.path not in candidate_paths:
+            candidate_paths.append(parsed.path)
+
+    return {
+        "candidate_paths": candidate_paths[:MAX_DISCOVERED_PATHS],
+        "script_urls": _unique(script_urls)[:MAX_SCRIPT_ASSETS],
+        "link_urls": _unique(link_urls)[:20],
+        "form_actions": _unique(form_actions)[:10],
+    }
+
+
+def _inspect_javascript_assets(script_urls: list[str], headers: dict[str, str]) -> list[dict]:
+    assets = []
+    for url in script_urls[:MAX_SCRIPT_ASSETS]:
+        try:
+            response = _request(url, headers=headers, method="GET", read_limit=MAX_JS_PREVIEW)
+        except Exception as exc:
+            assets.append(
+                {
+                    "url": url,
+                    "status_code": 0,
+                    "error": str(exc),
+                    "secret_matches": [],
+                    "discovered_endpoints": [],
+                }
+            )
+            continue
+
+        body = response.get("body_preview", "")
+        secret_matches = [name for name, pattern in SECRET_PATTERNS if pattern.search(body)]
+        endpoint_matches = []
+        for match in ENDPOINT_PATTERN.findall(body):
+            cleaned = match.strip()
+            if cleaned not in endpoint_matches:
+                endpoint_matches.append(cleaned)
+
+        assets.append(
+            {
+                "url": url,
+                "status_code": response["status_code"],
+                "content_type": _header_value(response, "Content-Type"),
+                "secret_matches": secret_matches,
+                "discovered_endpoints": endpoint_matches[:10],
+            }
+        )
+    return assets
+
+
 def _inspect_security_headers(response: dict) -> dict:
     headers = response["headers"]
     present = [header for header in REQUIRED_SECURITY_HEADERS if header in headers]
@@ -547,6 +742,7 @@ def _inspect_cors(response: dict) -> dict:
         "allow_origin": _header_value(response, "Access-Control-Allow-Origin"),
         "allow_methods": _header_value(response, "Access-Control-Allow-Methods"),
         "allow_headers": _header_value(response, "Access-Control-Allow-Headers"),
+        "allow_credentials": _header_value(response, "Access-Control-Allow-Credentials"),
     }
 
 
@@ -759,6 +955,7 @@ def _analyze_api_schema(base_url: str, headers: dict[str, str]) -> dict:
         operations = []
         public_examples = []
         sensitive_examples = []
+        unauthenticated_sensitive_examples = []
 
         for route, route_definition in paths.items():
             if not isinstance(route_definition, dict):
@@ -783,6 +980,8 @@ def _analyze_api_schema(base_url: str, headers: dict[str, str]) -> dict:
                     public_examples.append(operation_key)
                 if _contains_sensitive_hint(route) and len(sensitive_examples) < 5:
                     sensitive_examples.append(operation_key)
+                if _contains_sensitive_hint(route) and not security and len(unauthenticated_sensitive_examples) < 5:
+                    unauthenticated_sensitive_examples.append(operation_key)
 
         return {
             "status": "ok",
@@ -791,8 +990,10 @@ def _analyze_api_schema(base_url: str, headers: dict[str, str]) -> dict:
             "operation_count": len(operations),
             "public_endpoint_count": len([item for item in operations if not item["has_security"]]),
             "sensitive_endpoint_count": len({item for item in sensitive_examples}),
+            "unauthenticated_sensitive_count": len(unauthenticated_sensitive_examples),
             "public_examples": public_examples,
             "sensitive_examples": sensitive_examples,
+            "unauthenticated_sensitive_examples": unauthenticated_sensitive_examples,
         }
 
     return {
@@ -802,8 +1003,10 @@ def _analyze_api_schema(base_url: str, headers: dict[str, str]) -> dict:
         "operation_count": 0,
         "public_endpoint_count": 0,
         "sensitive_endpoint_count": 0,
+        "unauthenticated_sensitive_count": 0,
         "public_examples": [],
         "sensitive_examples": [],
+        "unauthenticated_sensitive_examples": [],
     }
 
 
@@ -897,6 +1100,29 @@ def _format_probe_evidence(item: dict) -> str:
 def _contains_sensitive_hint(value: str) -> bool:
     lowered = value.lower()
     return any(hint in lowered for hint in SENSITIVE_HINTS)
+
+
+def _normalize_same_origin_url(base_url: str, candidate: str) -> str:
+    absolute = parse.urljoin(base_url, candidate)
+    base = parse.urlparse(base_url)
+    parsed_candidate = parse.urlparse(absolute)
+
+    if parsed_candidate.scheme not in {"http", "https"}:
+        return ""
+    if parsed_candidate.netloc != base.netloc:
+        return ""
+    return absolute
+
+
+def _unique(values: list[str]) -> list[str]:
+    seen = set()
+    ordered = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
 
 
 def _preview_text(value: str, limit: int = 180) -> str:

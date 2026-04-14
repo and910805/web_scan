@@ -22,7 +22,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate_email(self, value: str) -> str:
         email = value.lower().strip()
         if User.objects.filter(email=email).exists():
-            raise serializers.ValidationError("這個 Email 已經被註冊。")
+            raise serializers.ValidationError("這個 Email 已經被使用。")
         return email
 
     def validate_username(self, value: str) -> str:

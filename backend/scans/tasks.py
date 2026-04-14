@@ -1,5 +1,10 @@
+import socket
+import time
+from urllib import error as urllib_error
+
 import requests
 from celery import shared_task
+from django.conf import settings
 from django.core.files import File
 from django.utils import timezone
 
@@ -8,16 +13,29 @@ from .reports import generate_scan_pdf
 from .scanner import run_target_scan
 
 
-@shared_task(bind=True, autoretry_for=(), retry_backoff=False)
+@shared_task(
+    bind=True,
+    autoretry_for=(requests.Timeout, requests.ConnectionError, socket.timeout, TimeoutError, urllib_error.URLError),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 2},
+)
 def scan_project(self, scan_job_id: int) -> dict:
     scan_job = ScanJob.objects.select_related("user").get(pk=scan_job_id)
     scan_job.status = ScanJob.Status.RUNNING
     scan_job.started_at = timezone.now()
     scan_job.error_message = ""
-    scan_job.save(update_fields=["status", "started_at", "error_message", "updated_at"])
+    scan_job.failure_code = ""
+    scan_job.failure_context = {}
+    scan_job.save(update_fields=["status", "started_at", "error_message", "failure_code", "failure_context", "updated_at"])
 
     try:
-        findings = run_target_scan(scan_job.scan_type, scan_job.target_url)
+        findings = run_target_scan(
+            scan_job.scan_type,
+            scan_job.target_url,
+            auth_headers=scan_job.auth_headers,
+            auth_cookies=scan_job.auth_cookies,
+        )
+        findings = _enrich_with_optional_zap(scan_job, findings)
         findings = _apply_ignore_rules(findings, scan_job)
         previous_job = _get_previous_completed_scan(scan_job)
         findings = _apply_history_comparison(findings, previous_job)
@@ -39,6 +57,9 @@ def scan_project(self, scan_job_id: int) -> dict:
                 "result_summary",
                 "status",
                 "finished_at",
+                "error_message",
+                "failure_code",
+                "failure_context",
                 "report_file",
                 "report_content",
                 "updated_at",
@@ -47,10 +68,15 @@ def scan_project(self, scan_job_id: int) -> dict:
         _notify_hooks(scan_job)
         return findings
     except Exception as exc:
+        failure = _classify_scan_failure(exc, self.request.retries)
         scan_job.status = ScanJob.Status.FAILED
-        scan_job.error_message = str(exc)
+        scan_job.error_message = failure["message"]
+        scan_job.failure_code = failure["code"]
+        scan_job.failure_context = failure["context"]
         scan_job.finished_at = timezone.now()
-        scan_job.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
+        scan_job.save(
+            update_fields=["status", "error_message", "failure_code", "failure_context", "finished_at", "updated_at"]
+        )
         raise
 
 
@@ -205,6 +231,118 @@ def _notify_hooks(scan_job: ScanJob) -> None:
             hook.last_error = str(exc)
         hook.last_triggered_at = timezone.now()
         hook.save(update_fields=["last_status_code", "last_error", "last_triggered_at", "updated_at"])
+
+
+def _enrich_with_optional_zap(scan_job: ScanJob, findings: dict) -> dict:
+    if not settings.ZAP_ENABLED or not settings.ZAP_API_URL or scan_job.scan_type != ScanJob.ScanType.WEB:
+        return findings
+
+    base_url = settings.ZAP_API_URL.rstrip("/")
+    params = {}
+    if settings.ZAP_API_KEY:
+        params["apikey"] = settings.ZAP_API_KEY
+
+    try:
+        spider_response = requests.get(
+            f"{base_url}/JSON/spider/action/scan/",
+            params={**params, "url": scan_job.target_url},
+            timeout=15,
+        )
+        spider_response.raise_for_status()
+        scan_id = spider_response.json().get("scan")
+
+        if scan_id:
+            for _ in range(6):
+                status_response = requests.get(
+                    f"{base_url}/JSON/spider/view/status/",
+                    params={**params, "scanId": scan_id},
+                    timeout=10,
+                )
+                status_response.raise_for_status()
+                if status_response.json().get("status") == "100":
+                    break
+                time.sleep(1)
+
+        alerts_response = requests.get(
+            f"{base_url}/JSON/alert/view/alerts/",
+            params={**params, "baseurl": scan_job.target_url},
+            timeout=20,
+        )
+        alerts_response.raise_for_status()
+        alerts = alerts_response.json().get("alerts", [])[:20]
+
+        findings["issues"].extend(_map_zap_alert(alert) for alert in alerts)
+        findings["zap"] = {
+            "enabled": True,
+            "alert_count": len(alerts),
+        }
+        return findings
+    except Exception as exc:
+        findings["zap"] = {
+            "enabled": True,
+            "alert_count": 0,
+            "error": str(exc),
+        }
+        return findings
+
+
+def _classify_scan_failure(exc: Exception, retries: int) -> dict:
+    message = str(exc).strip() or exc.__class__.__name__
+    context = {
+        "exception_type": exc.__class__.__name__,
+        "retries": retries,
+        "retryable": False,
+    }
+
+    if isinstance(exc, (requests.Timeout, socket.timeout, TimeoutError)):
+        context["retryable"] = True
+        return {
+            "code": "timeout",
+            "message": f"Scan timed out while contacting the target. {message}",
+            "context": context,
+        }
+    if isinstance(exc, (requests.ConnectionError, urllib_error.URLError)):
+        context["retryable"] = True
+        return {
+            "code": "network_error",
+            "message": f"Network error while contacting the target. {message}",
+            "context": context,
+        }
+    if isinstance(exc, ValueError):
+        return {
+            "code": "validation_error",
+            "message": f"Invalid scan request. {message}",
+            "context": context,
+        }
+    if isinstance(exc, OSError):
+        return {
+            "code": "storage_error",
+            "message": f"Report generation or storage failed. {message}",
+            "context": context,
+        }
+    return {
+        "code": "unexpected_error",
+        "message": f"Unexpected scan failure. {message}",
+        "context": context,
+    }
+
+
+def _map_zap_alert(alert: dict) -> dict:
+    severity_map = {
+        "3": "high",
+        "2": "medium",
+        "1": "low",
+        "0": "low",
+    }
+    severity = severity_map.get(str(alert.get("riskcode", "")), "low")
+    return {
+        "category": "owasp_zap",
+        "severity": severity,
+        "title": alert.get("alert", "OWASP ZAP finding"),
+        "details": alert.get("description", "") or alert.get("name", ""),
+        "evidence": alert.get("url", ""),
+        "recommendation": alert.get("solution", "") or "Review the ZAP alert and remediate the affected endpoint.",
+    }
 
 
 def _issue_key(issue: dict) -> str:
