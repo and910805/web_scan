@@ -47,16 +47,16 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 
 const capabilityCards = [
   {
-    title: "Baseline Web Checks",
-    description: "Security headers, TLS posture, sensitive paths, robots.txt, sitemap.xml, and basic HTTP behavior.",
+    title: "網站基礎檢查",
+    description: "檢查安全標頭、TLS 狀態、敏感路徑、robots.txt、sitemap.xml 與基本 HTTP 行為。",
   },
   {
-    title: "API Surface Review",
-    description: "OpenAPI and docs exposure, CORS signals, dangerous methods, and common unauthenticated paths.",
+    title: "API 介面檢視",
+    description: "盤點 OpenAPI 與文件暴露、CORS 訊號、危險方法與常見未授權端點。",
   },
   {
-    title: "Async Report Flow",
-    description: "Submit a scan job, let the worker process it, then download a PDF report when the job completes.",
+    title: "非同步報告流程",
+    description: "送出掃描任務後由 worker 背景處理，完成後即可下載 PDF 弱掃報告。",
   },
 ];
 
@@ -124,7 +124,7 @@ export default function HomePage() {
 
     const activeToken = getActiveToken(manualToken);
     if (!activeToken) {
-      setError("Please sign in before starting a scan.");
+      setError("請先登入再開始掃描。");
       return;
     }
 
@@ -147,13 +147,13 @@ export default function HomePage() {
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error((payload as { detail?: string }).detail ?? "Scan submission failed.");
+        throw new Error((payload as { detail?: string }).detail ?? "送出掃描任務失敗。");
       }
 
       setJob(payload as ScanJob);
       syncAuthState(setManualToken, setUser);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Scan submission failed.");
+      setError(submitError instanceof Error ? submitError.message : "送出掃描任務失敗。");
     } finally {
       setSubmitting(false);
     }
@@ -162,7 +162,7 @@ export default function HomePage() {
   async function handleDownloadReport() {
     const activeToken = getActiveToken(manualToken);
     if (!job?.id || !activeToken) {
-      setError("Please sign in before downloading the PDF report.");
+      setError("請先登入再下載 PDF 報告。");
       router.push("/login");
       return;
     }
@@ -179,14 +179,14 @@ export default function HomePage() {
         clearAuth();
         setUser(null);
         setManualToken("");
-        throw new Error("Your login session expired. Please sign in again.");
+        throw new Error("登入狀態已過期，請重新登入。");
       }
 
       if (!response.ok) {
         if (response.status === 404) {
-          throw new Error("PDF report is not ready yet. Please wait a few seconds and try again.");
+          throw new Error("PDF 報告尚未產生完成，請稍後再試。");
         }
-        throw new Error(`PDF download failed with HTTP ${response.status}`);
+        throw new Error(`PDF 下載失敗。HTTP ${response.status}`);
       }
 
       const blob = await response.blob();
@@ -200,9 +200,9 @@ export default function HomePage() {
       window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
     } catch (downloadError) {
       if (downloadError instanceof Error && downloadError.name === "AbortError") {
-        setError("PDF download timed out. Please try again in a few seconds.");
+        setError("PDF 下載逾時，請稍後再試。");
       } else {
-        setError(downloadError instanceof Error ? downloadError.message : "PDF download failed.");
+        setError(downloadError instanceof Error ? downloadError.message : "PDF 下載失敗。");
       }
     } finally {
       setDownloading(false);
@@ -212,7 +212,7 @@ export default function HomePage() {
   async function fetchTrends() {
     const response = await fetchWithStoredAuth(`${API_BASE_URL}/scans/trends/`);
     if (!response.ok) {
-      throw new Error("Unable to load scan trends.");
+      throw new Error("無法載入掃描趨勢。");
     }
     return (await response.json()) as TrendSnapshot;
   }
@@ -231,7 +231,7 @@ export default function HomePage() {
         <nav className="flex items-center justify-between rounded-[1.5rem] border border-white/40 bg-white/50 px-5 py-4 backdrop-blur">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.3em] text-[var(--accent)]">WeakScan</p>
-            <p className="text-sm text-slate-600">Async website and API assessment</p>
+            <p className="text-sm text-slate-600">網站與 API 非同步弱掃平台</p>
           </div>
           <div className="flex items-center gap-3 text-sm">
             {user ? (
@@ -249,16 +249,16 @@ export default function HomePage() {
                   }}
                   className="rounded-full border border-slate-300 px-4 py-2 font-semibold text-slate-900"
                 >
-                  Log out
+                  登出
                 </button>
               </>
             ) : (
               <>
                 <Link href="/login" className="rounded-full border border-slate-300 px-4 py-2 font-semibold text-slate-900">
-                  Log in
+                  登入
                 </Link>
                 <Link href="/register" className="rounded-full bg-slate-950 px-4 py-2 font-semibold text-white">
-                  Register
+                  註冊
                 </Link>
               </>
             )}
@@ -268,51 +268,50 @@ export default function HomePage() {
         <header className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <section className="rounded-[2rem] border border-white/55 bg-[rgba(255,248,239,0.78)] p-7 shadow-[0_30px_90px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:p-9">
             <div className="inline-flex items-center gap-3 rounded-full border border-black/10 bg-white/70 px-4 py-2 text-xs font-bold uppercase tracking-[0.35em] text-[var(--accent-strong)]">
-              WeakScan Dashboard
+              WeakScan 控制台
             </div>
             <h1 className="mt-6 max-w-4xl text-4xl font-black leading-none tracking-[-0.04em] text-slate-950 sm:text-6xl">
-              Run a weak scan, keep the session alive, and export a clean report.
+              送出弱掃任務、保持登入狀態，並下載整理好的報告。
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              Submit a web or API target, let the worker process it in the background, and download the PDF report when
-              the scan finishes.
+              輸入網站或 API 目標後，系統會由 worker 在背景執行掃描，完成後即可下載 PDF 弱掃報告。
             </p>
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
-              <HeroMetric label="Processing" value="Celery worker" />
-              <HeroMetric label="Scan Modes" value="Web + API" />
-              <HeroMetric label="Output" value="PDF report" />
+              <HeroMetric label="處理方式" value="Celery worker" />
+              <HeroMetric label="掃描模式" value="網站 + API" />
+              <HeroMetric label="輸出內容" value="PDF 報告" />
             </div>
           </section>
 
           <section className="rounded-[2rem] border border-slate-800 bg-[#0d1320] p-7 text-white shadow-[0_30px_90px_rgba(15,23,42,0.22)] sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.32em] text-orange-300">Current Job</p>
-                <h2 className="mt-3 text-2xl font-bold">Live status</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.32em] text-orange-300">目前任務</p>
+                <h2 className="mt-3 text-2xl font-bold">即時狀態</h2>
               </div>
               <span className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] ${statusTone.badge}`}>
-                {job ? getStatusLabel(job.status) : "Idle"}
+                {job ? getStatusLabel(job.status) : "待命中"}
               </span>
             </div>
 
             <div className="mt-8 space-y-4">
               <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5">
                 <div className="flex items-center justify-between text-sm text-slate-300">
-                  <span>Target</span>
-                  <span>{job?.scan_type === "api" ? "API" : "Website"}</span>
+                  <span>目標</span>
+                  <span>{job?.scan_type === "api" ? "API" : "網站"}</span>
                 </div>
-                <p className="mt-3 break-all text-lg font-semibold text-white">{job?.target_url ?? "No active target"}</p>
+                <p className="mt-3 break-all text-lg font-semibold text-white">{job?.target_url ?? "尚無進行中的目標"}</p>
                 <p className="mt-2 text-sm text-slate-400">
-                  {job ? `Project ${job.project_name}` : "Start a scan to see live progress and summary metrics."}
+                  {job ? `專案：${job.project_name}` : "送出掃描後，這裡會顯示即時進度與摘要數據。"}
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <StatusMetric label="Findings" value={job?.result_summary?.issue_count ?? 0} tone="neutral" />
-                <StatusMetric label="Critical" value={job?.result_summary?.critical_count ?? 0} tone="critical" />
-                <StatusMetric label="High" value={job?.result_summary?.high_count ?? 0} tone="high" />
-                <StatusMetric label="Medium" value={job?.result_summary?.medium_count ?? 0} tone="medium" />
+                <StatusMetric label="問題數" value={job?.result_summary?.issue_count ?? 0} tone="neutral" />
+                <StatusMetric label="嚴重" value={job?.result_summary?.critical_count ?? 0} tone="critical" />
+                <StatusMetric label="高風險" value={job?.result_summary?.high_count ?? 0} tone="high" />
+                <StatusMetric label="中風險" value={job?.result_summary?.medium_count ?? 0} tone="medium" />
               </div>
             </div>
           </section>
@@ -333,24 +332,24 @@ export default function HomePage() {
         {trends ? (
           <section className="grid gap-6 lg:grid-cols-[1fr_1fr]">
             <div className="rounded-[2rem] border border-white/50 bg-white/70 p-7 shadow-[0_22px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Trend Dashboard</p>
-              <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Recent scan trends</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">趨勢儀表板</p>
+              <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">近期掃描趨勢</h2>
               <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                <ResultCard label="All Scans" value={trends.scan_count} accent="text-slate-950" />
-                <ResultCard label="Completed" value={trends.completed_count} accent="text-emerald-700" />
-                <ResultCard label="Failed" value={trends.failed_count} accent="text-rose-700" />
+                <ResultCard label="總掃描數" value={trends.scan_count} accent="text-slate-950" />
+                <ResultCard label="已完成" value={trends.completed_count} accent="text-emerald-700" />
+                <ResultCard label="失敗" value={trends.failed_count} accent="text-rose-700" />
               </div>
               <div className="mt-6 grid gap-4 sm:grid-cols-4">
-                <ResultCard label="Crit Total" value={trends.severity_totals.critical ?? 0} accent="text-rose-700" />
-                <ResultCard label="High Total" value={trends.severity_totals.high ?? 0} accent="text-red-700" />
-                <ResultCard label="Med Total" value={trends.severity_totals.medium ?? 0} accent="text-amber-700" />
-                <ResultCard label="Low Total" value={trends.severity_totals.low ?? 0} accent="text-sky-700" />
+                <ResultCard label="嚴重總數" value={trends.severity_totals.critical ?? 0} accent="text-rose-700" />
+                <ResultCard label="高風險總數" value={trends.severity_totals.high ?? 0} accent="text-red-700" />
+                <ResultCard label="中風險總數" value={trends.severity_totals.medium ?? 0} accent="text-amber-700" />
+                <ResultCard label="低風險總數" value={trends.severity_totals.low ?? 0} accent="text-sky-700" />
               </div>
             </div>
 
             <div className="rounded-[2rem] border border-white/50 bg-white/70 p-7 shadow-[0_22px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Exposure View</p>
-              <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Top targets and recent jobs</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">目標曝光</p>
+              <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">熱門目標與近期任務</h2>
               <div className="mt-6 space-y-3">
                 {trends.top_targets.map((target) => (
                   <div key={target.target_url} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
@@ -370,7 +369,7 @@ export default function HomePage() {
                     </div>
                     <p className="mt-2 truncate text-sm text-slate-600">{recentJob.target_url}</p>
                     <p className="mt-2 text-xs uppercase tracking-[0.22em] text-slate-500">
-                      Findings {recentJob.issue_count} / Risk {recentJob.risk_score}
+                      問題 {recentJob.issue_count} / 風險分數 {recentJob.risk_score}
                     </p>
                   </div>
                 ))}
@@ -386,68 +385,66 @@ export default function HomePage() {
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-orange-300">New Scan</p>
-                <h2 className="mt-3 text-3xl font-black tracking-tight">Submit target</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-orange-300">建立新任務</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight">送出掃描目標</h2>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-right">
-                <p className="text-[10px] uppercase tracking-[0.32em] text-slate-400">Auth</p>
-                <p className="mt-1 text-sm font-semibold text-white">{user ? "Stored session" : "Login required"}</p>
+                <p className="text-[10px] uppercase tracking-[0.32em] text-slate-400">授權</p>
+                <p className="mt-1 text-sm font-semibold text-white">{user ? "已儲存登入狀態" : "需要登入"}</p>
               </div>
             </div>
 
             <div className="mt-8 space-y-5">
               {user ? (
                 <div className="rounded-[1.35rem] border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-100">
-                  Signed in as <span className="font-semibold">{user.username}</span>. You can keep submitting scans
-                  without logging in again while the session is valid.
+                  目前登入帳號為 <span className="font-semibold">{user.username}</span>。在登入有效期間內，可直接持續送出掃描任務。
                 </div>
               ) : (
                 <div className="rounded-[1.35rem] border border-amber-300/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-100">
-                  Please <Link href="/login" className="font-semibold text-amber-200 underline">log in</Link> before submitting a scan.
+                  請先 <Link href="/login" className="font-semibold text-amber-200 underline">登入</Link>，再送出掃描任務。
                 </div>
               )}
 
               <details className="rounded-[1.35rem] border border-white/10 bg-white/5 px-4 py-4">
-                <summary className="cursor-pointer list-none text-sm font-semibold text-white">Manual token override</summary>
+                <summary className="cursor-pointer list-none text-sm font-semibold text-white">進階設定：手動覆寫 Token</summary>
                 <p className="mt-3 text-sm text-slate-400">
-                  Normally the app uses the stored access token automatically. You only need this box if you want to
-                  test with a pasted JWT manually.
+                  系統平常會自動使用已儲存的 access token。只有在你想手動貼上 JWT 測試時，才需要使用這個欄位。
                 </p>
                 <div className="mt-4">
-                  <Field label="JWT token" hint="Optional override">
+                  <Field label="JWT 權杖" hint="非必填">
                     <textarea
                       value={manualToken}
                       onChange={(event) => setManualToken(event.target.value)}
                       className="dark-field min-h-28 w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70"
-                      placeholder="Paste a Bearer token only if you want to override the stored session."
+                      placeholder="只有在要覆寫目前登入狀態時，才需要手動貼上 Bearer token。"
                     />
                   </Field>
                 </div>
               </details>
 
               <div className="grid gap-5 md:grid-cols-2">
-                <Field label="Project name" hint="Optional">
+                <Field label="專案名稱" hint="非必填">
                   <input
                     value={projectName}
                     onChange={(event) => setProjectName(event.target.value)}
                     className="dark-field w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-orange-300/70"
-                    placeholder="customer-portal"
+                    placeholder="客戶主站"
                   />
                 </Field>
 
-                <Field label="Scan type" hint="Website or API">
+                <Field label="掃描類型" hint="網站或 API">
                   <select
                     value={scanType}
                     onChange={(event) => setScanType(event.target.value as "web" | "api")}
                     className="dark-field w-full rounded-[1.35rem] border border-white/10 px-4 py-3 text-sm text-white outline-none transition focus:border-orange-300/70"
                   >
-                    <option value="web">Website</option>
+                    <option value="web">網站</option>
                     <option value="api">API</option>
                   </select>
                 </Field>
               </div>
 
-              <Field label="Target URL" hint="Required">
+              <Field label="目標網址" hint="必填">
                 <input
                   type="url"
                   value={targetUrl}
@@ -465,9 +462,9 @@ export default function HomePage() {
                 disabled={!canSubmit}
                 className="inline-flex min-w-40 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f97316_0%,#dc2626_100%)] px-6 py-3.5 text-sm font-bold text-white shadow-[0_12px_34px_rgba(249,115,22,0.32)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting ? "Submitting..." : "Start scan"}
+                {submitting ? "送出中..." : "開始掃描"}
               </button>
-              <p className="text-sm text-slate-400">Each scan currently costs 1 credit.</p>
+              <p className="text-sm text-slate-400">目前每次掃描會扣除 1 點 credit。</p>
             </div>
 
             {error ? (
@@ -480,8 +477,8 @@ export default function HomePage() {
           <section className="rounded-[2rem] border border-white/50 bg-[rgba(255,255,255,0.74)] p-7 shadow-[0_30px_90px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Results</p>
-                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Scan output</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">結果面板</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">掃描輸出</h2>
               </div>
               {job?.report_file ? (
                 <button
@@ -490,18 +487,17 @@ export default function HomePage() {
                   disabled={downloading}
                   className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm disabled:opacity-60"
                 >
-                  {downloading ? "Downloading..." : "Download PDF"}
+                  {downloading ? "下載中..." : "下載 PDF"}
                 </button>
               ) : null}
             </div>
 
             {!job ? (
               <div className="mt-8 rounded-[1.75rem] border border-dashed border-slate-300 bg-slate-50/70 p-8">
-                <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-500">Waiting</p>
-                <h3 className="mt-4 text-2xl font-bold text-slate-900">No scan yet</h3>
+                <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-500">等待中</p>
+                <h3 className="mt-4 text-2xl font-bold text-slate-900">尚未建立掃描</h3>
                 <p className="mt-3 max-w-xl text-sm leading-7 text-slate-600">
-                  Submit a target URL to start an async job. Once the worker completes, this panel will show the summary
-                  and let you download the PDF report.
+                  送出目標網址後，系統會建立非同步任務。待 worker 執行完成後，這裡會顯示摘要並提供 PDF 報告下載。
                 </p>
               </div>
             ) : (
@@ -510,7 +506,7 @@ export default function HomePage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">
-                        {job.scan_type === "api" ? "API scan" : "Website scan"}
+                        {job.scan_type === "api" ? "API 掃描" : "網站掃描"}
                       </p>
                       <h3 className="mt-2 text-2xl font-bold text-slate-950">{job.project_name}</h3>
                     </div>
@@ -522,36 +518,36 @@ export default function HomePage() {
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <ResultCard label="Total Findings" value={job.result_summary?.issue_count ?? 0} accent="text-slate-950" />
-                  <ResultCard label="Critical" value={job.result_summary?.critical_count ?? 0} accent="text-rose-700" />
-                  <ResultCard label="High" value={job.result_summary?.high_count ?? 0} accent="text-red-700" />
-                  <ResultCard label="Risk Score" value={job.result_summary?.risk_score ?? 0} accent="text-amber-700" />
+                  <ResultCard label="總問題數" value={job.result_summary?.issue_count ?? 0} accent="text-slate-950" />
+                  <ResultCard label="嚴重" value={job.result_summary?.critical_count ?? 0} accent="text-rose-700" />
+                  <ResultCard label="高風險" value={job.result_summary?.high_count ?? 0} accent="text-red-700" />
+                  <ResultCard label="風險分數" value={job.result_summary?.risk_score ?? 0} accent="text-amber-700" />
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-3">
-                  <ResultCard label="New" value={job.result_summary?.new_count ?? 0} accent="text-orange-700" />
-                  <ResultCard label="Persistent" value={job.result_summary?.persistent_count ?? 0} accent="text-slate-900" />
-                  <ResultCard label="Resolved" value={job.result_summary?.resolved_count ?? 0} accent="text-emerald-700" />
+                  <ResultCard label="新增" value={job.result_summary?.new_count ?? 0} accent="text-orange-700" />
+                  <ResultCard label="持續存在" value={job.result_summary?.persistent_count ?? 0} accent="text-slate-900" />
+                  <ResultCard label="已解決" value={job.result_summary?.resolved_count ?? 0} accent="text-emerald-700" />
                 </div>
 
                 <div className="rounded-[1.5rem] bg-slate-950 p-5 text-white">
-                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-orange-300">Job timeline</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-orange-300">任務流程</p>
                   <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                    <TimelineStep title="Submitted" active>
-                      The API accepted the target and created a scan job.
+                    <TimelineStep title="已送出" active>
+                      API 已接受目標並建立掃描任務。
                     </TimelineStep>
-                    <TimelineStep title="Processing" active={job.status === "running" || job.status === "completed" || job.status === "failed"}>
-                      The worker is evaluating the target and producing findings.
+                    <TimelineStep title="處理中" active={job.status === "running" || job.status === "completed" || job.status === "failed"}>
+                      Worker 正在分析目標並產生發現項目。
                     </TimelineStep>
-                    <TimelineStep title="Report ready" active={job.status === "completed"}>
-                      When the PDF is available, the download button will appear above.
+                    <TimelineStep title="報告完成" active={job.status === "completed"}>
+                      PDF 可下載後，上方會出現下載按鈕。
                     </TimelineStep>
                   </div>
                 </div>
 
                 {job.error_message ? (
                   <div className="rounded-[1.5rem] border border-red-200 bg-red-50 p-5 text-sm text-red-800">
-                    <p className="font-semibold">Job error</p>
+                    <p className="font-semibold">任務錯誤</p>
                     <p className="mt-2">{job.error_message}</p>
                   </div>
                 ) : null}
@@ -663,13 +659,13 @@ function getStatusTone(status?: ScanJob["status"]) {
 function getStatusLabel(status: ScanJob["status"]) {
   switch (status) {
     case "pending":
-      return "Pending";
+      return "等待中";
     case "running":
-      return "Running";
+      return "執行中";
     case "completed":
-      return "Completed";
+      return "已完成";
     case "failed":
-      return "Failed";
+      return "失敗";
   }
 }
 
@@ -677,7 +673,7 @@ function deriveProjectName(targetUrl: string) {
   try {
     return new URL(targetUrl).hostname;
   } catch {
-    return "untitled-target";
+    return "未命名目標";
   }
 }
 

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "WeakScan 弱掃平台",
-  description: "網站與 API 弱點掃描平台",
+  description: "網站與 API 非同步弱掃平台",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

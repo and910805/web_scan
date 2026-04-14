@@ -30,14 +30,14 @@ export default function RegisterPage() {
       const payload = await response.json();
       if (!response.ok) {
         const message =
-          payload.email?.[0] ?? payload.username?.[0] ?? payload.password?.[0] ?? payload.detail ?? "註冊失敗";
+          payload.email?.[0] ?? payload.username?.[0] ?? payload.password?.[0] ?? payload.detail ?? "註冊失敗。";
         throw new Error(message);
       }
 
       storeAuth(payload.tokens, payload.user);
       router.push("/");
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "註冊失敗");
+      setError(submitError instanceof Error ? submitError.message : "註冊失敗。");
     } finally {
       setSubmitting(false);
     }
@@ -50,12 +50,12 @@ export default function RegisterPage() {
           <p className="text-xs font-bold uppercase tracking-[0.35em] text-[var(--accent)]">WeakScan Register</p>
           <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">建立新帳號</h1>
           <p className="mt-4 max-w-xl text-base leading-7 text-slate-600">
-            建立帳號後即可直接登入系統，使用 credit 建立弱掃任務並追蹤掃描報告。
+            註冊後即可開始使用平台弱掃功能，系統會提供預設額度，讓你能立即提交網站或 API 掃描任務。
           </p>
         </div>
 
         <div className="rounded-[2rem] border border-slate-900/80 bg-[linear-gradient(180deg,#0f172a_0%,#111827_100%)] p-8 text-white shadow-[0_40px_100px_rgba(15,23,42,0.28)]">
-          <h2 className="text-3xl font-black tracking-tight">使用 Email 註冊</h2>
+          <h2 className="text-3xl font-black tracking-tight">使用者與 Email 註冊</h2>
           <form onSubmit={handleSubmit} className="mt-8 space-y-5">
             <AuthField label="使用者名稱">
               <input
@@ -82,7 +82,7 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className="w-full rounded-[1.25rem] border border-white/10 bg-white/6 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
-                placeholder="至少 8 碼"
+                placeholder="至少 8 個字元"
                 required
               />
             </AuthField>

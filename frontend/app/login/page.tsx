@@ -34,7 +34,7 @@ export default function LoginPage() {
     });
     const payload = (await readApiPayload(response)) as Partial<AuthUser> & { detail?: string };
     if (!response.ok) {
-      throw new Error(payload.detail ?? "無法取得使用者資料");
+      throw new Error(payload.detail ?? "無法取得目前使用者資料。");
     }
     return payload as AuthUser;
   }
@@ -52,17 +52,17 @@ export default function LoginPage() {
       });
       const payload = (await readApiPayload(response)) as Partial<TokenPair> & { detail?: string };
       if (!response.ok) {
-        throw new Error(payload.detail ?? "登入失敗");
+        throw new Error(payload.detail ?? "登入失敗。");
       }
       if (!payload.access || !payload.refresh) {
-        throw new Error("登入回應缺少 token。");
+        throw new Error("登入成功但沒有拿到完整的 token。");
       }
 
       const user = await fetchProfile(payload.access);
       storeAuth({ access: payload.access, refresh: payload.refresh }, user);
       router.push("/");
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "登入失敗");
+      setError(submitError instanceof Error ? submitError.message : "登入失敗。");
     } finally {
       setSubmitting(false);
     }
@@ -79,16 +79,16 @@ export default function LoginPage() {
       });
       const payload = (await readApiPayload(response)) as GoogleLoginResponse;
       if (!response.ok) {
-        throw new Error(payload.detail ?? "Google 登入失敗");
+        throw new Error(payload.detail ?? "Google 登入失敗。");
       }
       if (!payload.tokens?.access || !payload.tokens?.refresh || !payload.user) {
-        throw new Error("Google 登入回應格式不完整。");
+        throw new Error("Google 登入成功，但回傳資料不完整。");
       }
 
       storeAuth(payload.tokens, payload.user);
       router.push("/");
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Google 登入失敗");
+      setError(submitError instanceof Error ? submitError.message : "Google 登入失敗。");
     }
   }
 
@@ -99,13 +99,13 @@ export default function LoginPage() {
           <p className="text-xs font-bold uppercase tracking-[0.35em] text-[var(--accent)]">WeakScan Login</p>
           <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">登入弱掃平台</h1>
           <p className="mt-4 max-w-xl text-base leading-7 text-slate-600">
-            登入後即可提交掃描任務、查看 credit、下載 PDF 報告，支援帳號密碼與 Google 登入。
+            登入後即可提交掃描任務、查看額度與風險摘要，並下載 PDF 報告。支援帳號密碼與 Google 登入。
           </p>
           <div className="mt-8 rounded-[1.5rem] bg-slate-950 p-6 text-white">
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-orange-300">登入後可用</p>
             <ul className="mt-4 space-y-3 text-sm text-slate-200">
               <li>建立網站與 API 掃描任務</li>
-              <li>查看任務狀態與風險摘要</li>
+              <li>查看任務狀態、風險與額度</li>
               <li>下載 PDF 弱掃報告</li>
             </ul>
           </div>
